@@ -34,10 +34,12 @@ export default function NewsPage() {
   const [activeDate, setActiveDate] = useState<string | null>(null);
   const dates = useApi(() => api.newsDates());
   const news = useApi(() => api.news(activeDate ?? undefined), [activeDate]);
+  const brief = useApi(() => api.newsBrief());
 
   const [scraping, setScraping] = useState(false);
   const [scrapeResult, setScrapeResult] = useState<ScrapeResponse | null>(null);
   const [scrapeError, setScrapeError] = useState<string | null>(null);
+  const [briefing, setBriefing] = useState(false);
 
   async function scrape() {
     setScraping(true);
@@ -55,9 +57,19 @@ export default function NewsPage() {
     }
   }
 
+  async function makeBrief() {
+    setBriefing(true);
+    try {
+      await api.runNewsBrief();
+      brief.reload();
+    } finally {
+      setBriefing(false);
+    }
+  }
+
   const items = news.data?.items ?? [];
   const grouped = useMemo(() => groupByDate(news.data?.items ?? []), [news.data]);
-  const retentionDays = dates.data?.dates.length ?? 0;
+  const b = brief.data;
 
   return (
     <main className="mx-auto max-w-6xl space-y-8 px-6 py-10">
@@ -80,14 +92,45 @@ export default function NewsPage() {
             +{scrapeResult.added}건 추가 · {scrapeResult.pruned}건 정리 · 수집 {scrapeResult.fetched}건
           </span>
         )}
-        {retentionDays > 0 && (
-          <span className="num ml-auto text-[11px] text-muted/80">
-            최근 {retentionDays}일 보존, 이전 항목 자동 삭제
-          </span>
-        )}
+        <span className="num ml-auto text-[11px] text-muted/80">
+          오래된 뉴스 자동 삭제 (보존 약 2주)
+        </span>
       </div>
 
       {scrapeError && <ErrorNote error={scrapeError} />}
+
+      {/* News daily brief (news roundup, tied to the agents' read) */}
+      <section className="card">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="section-label">뉴스 데일리 브리프 (뉴스 종합 요약)</h2>
+          <div className="flex items-center gap-2">
+            <span className="chip border-accent2/30 bg-accent2/10 text-accent2">
+              매일 08:00 자동 · 텔레그램
+            </span>
+            <button
+              onClick={makeBrief}
+              disabled={briefing}
+              className="rounded-lg border border-border bg-elevated/60 px-3 py-1 text-xs font-medium text-muted transition-colors hover:text-foreground disabled:opacity-40"
+            >
+              {briefing ? "생성 중…" : "브리프 재생성"}
+            </button>
+          </div>
+        </div>
+        {brief.loading ? (
+          <Loading />
+        ) : b ? (
+          <>
+            <p className="mt-3 leading-7 text-foreground/90">{b.summary}</p>
+            <p className="mt-2 border-l-2 border-accent/40 pl-3 text-sm text-muted">
+              {b.market_read}
+            </p>
+          </>
+        ) : (
+          <p className="mt-3 text-sm text-muted">
+            아직 브리프가 없습니다. 뉴스 스크랩 후 “브리프 재생성”을 누르거나, 매일 08:00 자동 생성됩니다.
+          </p>
+        )}
+      </section>
 
       <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
         {/* Date filter rail */}

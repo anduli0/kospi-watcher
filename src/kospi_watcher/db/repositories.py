@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kospi_watcher.db import models
 from kospi_watcher.domain.agents.schemas import AgentRun
 from kospi_watcher.domain.enums import AuditAction
+from kospi_watcher.domain.news_brief import NewsBrief
 from kospi_watcher.domain.prediction.schemas import MarketPrediction
 from kospi_watcher.domain.risk.schemas import OrderProposal, RiskDecision
 from kospi_watcher.domain.time import now_utc, to_kst
@@ -315,3 +316,35 @@ async def recent_headlines(session: AsyncSession, *, limit: int = 8) -> list[str
         .limit(limit)
     )
     return list((await session.execute(stmt)).scalars().all())
+
+
+# --- Daily brief (news roundup) ---
+
+
+async def save_daily_brief(session: AsyncSession, brief: NewsBrief) -> models.DailyBriefRow:
+    """Upsert the brief for its KST day (one brief per day)."""
+    row = await session.get(models.DailyBriefRow, brief.date)
+    if row is None:
+        row = models.DailyBriefRow(date_kst=brief.date)
+        session.add(row)
+    row.summary = brief.summary
+    row.market_read = brief.market_read
+    row.item_count = brief.item_count
+    row.generated_by = brief.generated_by
+    row.payload = brief.model_dump(mode="json")
+    row.created_at = now_utc()
+    await session.flush()
+    return row
+
+
+async def get_latest_daily_brief(session: AsyncSession) -> models.DailyBriefRow | None:
+    stmt = (
+        select(models.DailyBriefRow)
+        .order_by(desc(models.DailyBriefRow.date_kst))
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalars().first()
+
+
+async def get_daily_brief(session: AsyncSession, date_kst: str) -> models.DailyBriefRow | None:
+    return await session.get(models.DailyBriefRow, date_kst)

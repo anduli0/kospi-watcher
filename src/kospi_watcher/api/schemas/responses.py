@@ -223,6 +223,17 @@ class ScrapeResponse(BaseModel):
     topics: list[str]
 
 
+class MorningBriefingResponse(BaseModel):
+    news_added: int
+    prediction_direction: str
+    brief_items: int
+    telegram_enabled: bool
+    telegram_report: str
+    telegram_brief: str
+    report_message: str
+    brief_message: str
+
+
 class AuditLogEntry(BaseModel):
     id: int
     action: str

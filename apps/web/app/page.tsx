@@ -48,6 +48,7 @@ const BANNERS = [
 
 export default function Home() {
   const pred = useApi(() => api.latestPrediction());
+  const brief = useApi(() => api.newsBrief());
   const quotes = useApi(() => api.marketQuotes(["KOSPI", "USDKRW", "069500", "114800", "252670"]));
   const [generating, setGenerating] = useState(false);
 
@@ -62,6 +63,7 @@ export default function Home() {
   }
 
   const p = pred.data;
+  const b = brief.data;
   const notFound = pred.error?.includes("404");
   const priceFor = (symbol: string) =>
     quotes.data?.quotes.find((q) => q.symbol === symbol)?.price;
@@ -69,9 +71,14 @@ export default function Home() {
   return (
     <main className="mx-auto max-w-6xl space-y-8 px-6 py-10">
       {/* Intro */}
-      <p className="section-label">
-        오늘의 코스피 예측 · 데일리 브리프 · <span className="num">{TODAY}</span>
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="section-label">
+          예측 리포트 · 뉴스 데일리 브리프 · <span className="num">{TODAY}</span>
+        </p>
+        <span className="chip border-accent2/30 bg-accent2/10 text-accent2">
+          매일 08:00 자동 업데이트 · 텔레그램 발송
+        </span>
+      </div>
 
       {/* Live quote strip */}
       <div className="card flex flex-wrap items-center gap-x-6 gap-y-2 py-3.5">
@@ -151,10 +158,10 @@ export default function Home() {
         </section>
       )}
 
-      {/* Daily brief narrative */}
+      {/* Prediction report summary (the forecast narrative) */}
       {p && (
         <section className="card">
-          <h2 className="section-label">데일리 브리프</h2>
+          <h2 className="section-label">예측 리포트 요약</h2>
           <p className="mt-3 whitespace-pre-line leading-7 text-foreground/90">{p.brief}</p>
           {p.news_refs.length > 0 && (
             <div className="mt-4 border-t border-border/60 pt-4">
@@ -168,8 +175,56 @@ export default function Home() {
               </div>
             </div>
           )}
+          <Link
+            href="/prediction"
+            className="mt-4 inline-flex text-sm font-medium text-accent hover:underline"
+          >
+            예측 상세 · 논의 과정 보기 →
+          </Link>
         </section>
       )}
+
+      {/* News daily brief (the news roundup — distinct from the forecast) */}
+      <section className="card">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="section-label">뉴스 데일리 브리프 (뉴스 종합 요약)</h2>
+          {b && <span className="num text-[11px] text-muted/80">{b.item_count}건 · {b.date}</span>}
+        </div>
+        {brief.loading ? (
+          <Loading />
+        ) : b ? (
+          <>
+            <p className="mt-3 leading-7 text-foreground/90">{b.summary}</p>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              {b.themes.slice(0, 4).map((t) => (
+                <div key={t.topic} className="rounded-xl border border-border/60 bg-elevated/40 p-3">
+                  <p className="text-xs font-semibold text-accent2">
+                    {t.topic} <span className="num text-muted">· {t.count}건</span>
+                  </p>
+                  <ul className="mt-1.5 space-y-1">
+                    {t.headlines.slice(0, 2).map((h) => (
+                      <li key={h.url} className="truncate text-xs text-muted">
+                        · {h.title}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+            <Link
+              href="/news"
+              className="mt-4 inline-flex text-sm font-medium text-accent hover:underline"
+            >
+              전체 뉴스 · 일자별 보기 →
+            </Link>
+          </>
+        ) : (
+          <p className="mt-3 text-sm text-muted">
+            아직 생성된 뉴스 브리프가 없습니다. <Link href="/news" className="text-accent hover:underline">뉴스 페이지</Link>에서
+            스크랩 후 생성하거나, 매일 08:00 자동 생성됩니다.
+          </p>
+        )}
+      </section>
 
       {/* Instrument ladder */}
       {p && (

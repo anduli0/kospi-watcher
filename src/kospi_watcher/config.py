@@ -82,6 +82,13 @@ class Settings(BaseSettings):
         default_factory=lambda: ["http://localhost:3000"]
     )
 
+    # --- Notifications (Telegram daily briefing) ---
+    telegram_bot_token: SecretStr = SecretStr("")
+    telegram_chat_id: str = ""
+    # Daily morning-briefing time (Asia/Seoul). Worker must be running.
+    morning_briefing_hour: int = 8
+    morning_briefing_minute: int = 0
+
     # --- Logging ---
     log_level: str = "INFO"
     log_json: bool = True
@@ -101,6 +108,10 @@ class Settings(BaseSettings):
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
+
+    @property
+    def telegram_enabled(self) -> bool:
+        return bool(self.telegram_bot_token.get_secret_value() and self.telegram_chat_id)
 
     @property
     def live_execution_armed(self) -> bool:

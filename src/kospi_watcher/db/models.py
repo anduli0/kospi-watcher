@@ -199,6 +199,21 @@ class NewsItemRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DailyBriefRow(Base):
+    """A news daily-brief (themed roundup), one per KST calendar day. The full
+    NewsBrief is kept in ``payload``; upserted by ``date_kst`` (ADR-020)."""
+
+    __tablename__ = "daily_briefs"
+
+    date_kst: Mapped[str] = mapped_column(String(10), primary_key=True)
+    summary: Mapped[str] = mapped_column(Text)
+    market_read: Mapped[str] = mapped_column(Text)
+    item_count: Mapped[int] = mapped_column(Integer)
+    generated_by: Mapped[str] = mapped_column(String(16))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class AuditLogRow(Base):
     """Append-only audit log. No update/delete path exists in application code
     (ADR-006). New rows only."""

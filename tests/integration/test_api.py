@@ -112,6 +112,28 @@ async def test_news_scrape_list_and_dates(client: AsyncClient) -> None:
     assert len(dates.json()["dates"]) >= 1
 
 
+async def test_daily_brief_endpoints(client: AsyncClient) -> None:
+    assert (await client.get("/api/v1/news/brief")).status_code == 404  # none yet
+    await client.post("/api/v1/news/scrape")  # mock news
+    run = await client.post("/api/v1/news/brief/run")
+    assert run.status_code == 200
+    brief = run.json()
+    assert brief["item_count"] >= 1
+    assert "종합" in brief["summary"]
+    assert brief["themes"]
+    assert (await client.get("/api/v1/news/brief")).status_code == 200
+
+
+async def test_notify_morning_runs_without_telegram(client: AsyncClient) -> None:
+    resp = await client.post("/api/v1/notify/morning")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["telegram_enabled"] is False  # no bot token in tests
+    assert "예측 리포트" in data["report_message"]
+    assert "뉴스 데일리 브리프" in data["brief_message"]
+    assert data["brief_items"] >= 1
+
+
 async def test_market_quotes(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/market/quotes?symbols=069500,USDKRW")
     assert resp.status_code == 200

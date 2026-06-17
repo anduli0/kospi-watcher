@@ -221,6 +221,39 @@ export interface NewsItem {
   date_kst: string;
 }
 
+export interface NewsHeadline {
+  title: string;
+  source: string;
+  url: string;
+  published_at: string;
+}
+
+export interface NewsTheme {
+  topic: string;
+  count: number;
+  headlines: NewsHeadline[];
+}
+
+export interface NewsBrief {
+  date: string;
+  item_count: number;
+  summary: string;
+  market_read: string;
+  themes: NewsTheme[];
+  generated_by: string;
+}
+
+export interface MorningBriefing {
+  news_added: number;
+  prediction_direction: string;
+  brief_items: number;
+  telegram_enabled: boolean;
+  telegram_report: string;
+  telegram_brief: string;
+  report_message: string;
+  brief_message: string;
+}
+
 export interface NewsListResponse {
   count: number;
   date: string | null;
@@ -421,6 +454,10 @@ export const api = {
     ),
   newsDates: () => request<NewsDatesResponse>("/api/v1/news/dates"),
   scrapeNews: () => request<ScrapeResponse>("/api/v1/news/scrape", { method: "POST" }),
+  newsBrief: () => request<NewsBrief>("/api/v1/news/brief"),
+  runNewsBrief: () => request<NewsBrief>("/api/v1/news/brief/run", { method: "POST" }),
+  morningBriefing: () =>
+    request<MorningBriefing>("/api/v1/notify/morning", { method: "POST" }),
   validateProposal: (proposal: OrderProposalInput) =>
     request<{ valid: boolean; proposal_id: string; detail: string }>(
       "/api/v1/order-proposals/validate",

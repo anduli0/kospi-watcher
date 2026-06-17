@@ -3,18 +3,23 @@
 Status: Phase 1. Verified against the source tree under
 `src/kospi_watcher/`, `apps/`, `alembic/`, `pyproject.toml`, and `docker-compose.yml`.
 
-Seven capabilities are now live and described below: **real market data**
+Nine capabilities are now live and described below: **real market data**
 (keyless Yahoo Finance with a mock fallback, §4a), a **PAPER (simulated)
 execution path** (the safe execution tier, §4b), **real LLM agents**
 (Anthropic-backed, with a deterministic mock fallback, §4c), a **research-desk
 hierarchy** that organises the 21 agents into 5 desks + a Chief across 3 tiers
-(§4d), a **market-prediction / daily-brief engine** that synthesises every
-agent run into a single house view — regime, direction/confidence, long /
+(§4d), a **market-prediction engine** (the **prediction report**) that synthesises
+every agent run into a single house view — regime, direction/confidence, long /
 inverse / 곱버스 (leveraged-inverse) instrument stances, scenarios, and a Korean
 narrative brief (§4e), a **news scraping & retention layer** (keyless Google News
-RSS, a dated `news_items` store pruned to a retention window, feeding the brief,
-§4f), and a **visible agent deliberation** (desk positions → lead reconciliation →
-chief synthesis embedded in every prediction, §4g). The front end is now a
+RSS, a dated `news_items` store pruned to a retention window, feeding the report,
+§4f), a **visible agent deliberation** (desk positions → lead reconciliation →
+chief synthesis embedded in every prediction, §4g), a **news daily brief** — a
+*news roundup* digest of the day's headlines (a separate artifact from the
+prediction report) with a one-line `market_read` tying it to the house view, one
+row per KST day (§4h), and a **08:00 Asia/Seoul morning briefing** that, in the
+worker, scrapes → predicts → builds the news brief → pushes both the prediction
+report and the news brief to Telegram (§4i). The front end is now a
 **multi-page modern UI** (Pretendard, dark fintech palette) with an 오늘 / 예측 /
 뉴스 / 에이전트 / 트레이딩 / 시스템 nav and a disclaimer + ownership footer (§6a).
 
@@ -24,6 +29,16 @@ chief synthesis embedded in every prediction, §4g). The front end is now a
 > unimplemented). The prediction is a **deterministic synthesis** over the agent
 > findings, so it is identical whether those findings came from the mock or the
 > real-LLM runtime.
+
+> **Two distinct artifacts — do not conflate.** The **prediction report**
+> (`MarketPrediction`, `GET /api/v1/prediction/latest` & `/brief`, §4e) is the
+> **forecast** — the house view of where the market is headed. The **news daily
+> brief** (`NewsBrief`, `GET /api/v1/news/brief`, §4h) is a **news roundup** — a
+> themed digest *summarizing* the day's scraped headlines, with a one-line
+> `market_read` that merely references the latest prediction's regime/direction.
+> They are separate schemas, separate tables (`market_predictions` vs
+> `daily_briefs`), and separate endpoints. The 08:00 morning briefing (§4i) sends
+> **both** to Telegram.
 
 > Safety note carried through this document: **PAPER (simulated) execution is
 > implemented and safe** — it moves no real money and contacts no real broker,
@@ -77,15 +92,15 @@ thin entrypoints under `apps/<svc>/main.py` that import the shared package
 | `api` | `src/kospi_watcher/api/app.py` (`create_app`) via `apps/api/main.py` | 8000 | Main FastAPI app. Health, system status, agent list / mock-run / LLM run, live market quotes, order-proposal validation, risk evaluation, **paper trading** (orders / positions / account), audit-log listing. Owns persistence + seeding on startup. |
 | `agent-service` | `src/kospi_watcher/agent_service/app.py` via `apps/agent-service/main.py` | 8001 | Isolated ASGI app. **Analysis only**, no order-execution surface. Exposes `/health`, `/agents`, `/run`. |
 | `execution-gateway` | `src/kospi_watcher/execution_gateway/app.py` via `apps/execution-gateway/main.py` | 8002 | Isolated ASGI app. **No public submit endpoint** in this phase — exposes only `/health`. The submit path is in-process; `ExecutionGateway` allows the simulated `MOCK` and `PAPER` brokers and blocks any live broker. |
-| `worker` | `src/kospi_watcher/worker/scheduler.py` via `apps/worker/main.py` | — | APScheduler process: a `heartbeat` job (every 60s), a `mock_agent_sweep` job (every 15 min), a `scrape_news` job (every 60 min) that fetches the configured topics, stores new items, and prunes old ones (§4f), and a `refresh_prediction` job (every 30 min) that runs all agents, synthesizes a fresh (news-aware) house prediction / daily brief, and persists it (§4e, §4g). Never creates orders. |
+| `worker` | `src/kospi_watcher/worker/scheduler.py` via `apps/worker/main.py` | — | APScheduler process. The headline job is the daily **`morning_briefing`** (`CronTrigger` `hour=morning_briefing_hour` `minute=morning_briefing_minute` `timezone="Asia/Seoul"`, default **08:00 KST**): scrape news → generate+save the prediction report → generate+save the news daily brief → send both to Telegram (§4h). Plus a `scrape_news` job (every 60 min) that fetches the configured topics, stores new items, and prunes old ones (§4f), and a `heartbeat` job (every 60s). **The worker must be running for the 08:00 auto-delivery**; otherwise use `POST /api/v1/notify/morning`. Never creates orders. |
 | `web` | `apps/web/` (Next.js App Router) | 3000 | Next.js 15 / React 19 front end — a **multi-page modern UI** (Pretendard font, dark fintech palette) with a sticky nav (오늘 / 예측 / 뉴스 / 에이전트 / 트레이딩 / 시스템) and a disclaimer + ownership footer (§6a). Reads `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8000`). |
 
-The `api` service mounts ten routers (`src/kospi_watcher/api/app.py`):
-`health` is mounted at the root; the other nine (`system`, `agents`,
+The `api` service mounts eleven routers (`src/kospi_watcher/api/app.py`):
+`health` is mounted at the root; the other ten (`system`, `agents`,
 `prediction`, `news`, `market`, `order_proposals`, `risk`, `trading`,
-`audit_logs`) are mounted under `/api/v1`.
+`notify`, `audit_logs`) are mounted under `/api/v1`.
 
-### The 21 `api` endpoints
+### The 24 `api` endpoints
 
 | Method | Path | Route module |
 |---|---|---|
@@ -101,6 +116,8 @@ The `api` service mounts ten routers (`src/kospi_watcher/api/app.py`):
 | GET | `/api/v1/news` | `api/routes/news.py` |
 | GET | `/api/v1/news/dates` | `api/routes/news.py` |
 | POST | `/api/v1/news/scrape` | `api/routes/news.py` |
+| GET | `/api/v1/news/brief` | `api/routes/news.py` |
+| POST | `/api/v1/news/brief/run` | `api/routes/news.py` |
 | GET | `/api/v1/market/quotes` | `api/routes/market.py` |
 | POST | `/api/v1/order-proposals/validate` | `api/routes/order_proposals.py` |
 | POST | `/api/v1/risk/evaluate` | `api/routes/risk.py` |
@@ -109,15 +126,20 @@ The `api` service mounts ten routers (`src/kospi_watcher/api/app.py`):
 | GET | `/api/v1/orders/{order_id}` | `api/routes/trading.py` |
 | GET | `/api/v1/positions` | `api/routes/trading.py` |
 | GET | `/api/v1/account` | `api/routes/trading.py` |
+| POST | `/api/v1/notify/morning` | `api/routes/notify.py` |
 | GET | `/api/v1/audit-logs` | `api/routes/audit_logs.py` |
 
 `POST /api/v1/agents/run` runs the configured agent runtime (real LLM when armed,
 else the mock); the four `prediction.py` endpoints expose the product's primary
-surface — run/fetch the house prediction (now carrying a visible deliberation,
-§4g), the daily brief, and the desk org chart (§4d, §4e); the three `news.py`
-endpoints list dated headlines, the available dates, and trigger a scrape (§4f);
+surface — run/fetch the house **prediction report** (now carrying a visible
+deliberation, §4g), the brief, and the desk org chart (§4d, §4e); the five
+`news.py` endpoints list dated headlines, the available dates, trigger a scrape
+(§4f), and fetch / build the **news daily brief** (`GET /news/brief`,
+`POST /news/brief/run`, a *news roundup* distinct from the prediction report, §4h);
 `GET /api/v1/market/quotes` returns live (or mock) quotes; the five `trading.py`
-endpoints drive the secondary PAPER execution path (§4b).
+endpoints drive the secondary PAPER execution path (§4b); `POST /api/v1/notify/morning`
+runs the morning-briefing pipeline on demand and returns the rendered messages +
+Telegram status (§4i).
 
 CORS allows only `GET`/`POST`, origins from `cors_allow_origins`
 (default `http://localhost:3000`), and credentials are disabled.
@@ -179,17 +201,19 @@ src/kospi_watcher/
 │   ├── enums.py              # StrEnum domain enumerations
 │   ├── time.py               # tz-aware UTC helpers (ADR-009)
 │   ├── money.py              # Decimal-only money (ADR-008)
+│   ├── news_brief.py         # NewsBrief/NewsTheme/NewsHeadline (news roundup, ADR-020)
 │   ├── agents/               # base, catalog (21 specs), org (5 desks + Chief), registry, schemas, llm_agent
 │   ├── prediction/           # instruments (long/inverse ladder), regime, schemas, synthesizer
 │   ├── risk/                 # engine, limits, schemas
 │   └── execution/            # broker, order_state, paper, position
-├── infrastructure/           # db engine/session, redis client, market data, news
+├── infrastructure/           # db engine/session, redis client, market data, news, telegram
 │   ├── db.py
 │   ├── redis_client.py
+│   ├── telegram.py           # Telegram Bot API sender (never-raises, ADR-021)
 │   ├── marketdata/           # base (Quote/Protocol), yahoo, mock, factory
 │   └── news/                 # base (NewsItem/Protocol), google_rss, mock, factory
 ├── db/                       # ORM models, repositories, alembic-backed schema
-│   ├── models.py             # 11 tables
+│   ├── models.py             # 12 tables
 │   ├── types.py              # DecimalString TypeDecorator
 │   ├── repositories.py
 │   └── seed.py
@@ -197,8 +221,9 @@ src/kospi_watcher/
 ├── agent_service/            # isolated analysis ASGI app + service (mock + llm)
 ├── execution_gateway/        # isolated gateway ASGI app + ExecutionGateway
 ├── trading/                  # TradingService — the paper-execution orchestrator
-├── newsfeed/                 # NewsService — scrape → dedup-upsert → retention prune
-└── worker/                   # APScheduler jobs
+├── newsfeed/                 # NewsService (scrape → dedup-upsert → prune) + brief_builder (news daily brief, ADR-020)
+├── briefing/                 # run_morning_briefing — scrape→predict→brief→Telegram (ADR-021)
+└── worker/                   # APScheduler jobs (morning_briefing 08:00 KST, scrape_news, heartbeat)
 ```
 
 **Dependency rule (inward toward `domain`):**
@@ -515,12 +540,13 @@ it is about (`subject`) and over what horizon (`horizon_label`).
   narrative + the instrument stances with risk notes).
 - `GET /agents/org` — the desk hierarchy (§4d).
 
-**Worker.** The `refresh_prediction` job (every 30 min, `worker/scheduler.py`)
-regenerates and persists a fresh prediction so `/prediction/latest` and `/brief`
-stay current without a manual `POST`. It now pulls `repositories.recent_headlines`
-first and passes them to `PredictionService.generate(news_headlines=...)`, so the
-scheduled brief is **news-aware** (§4f); the `POST /prediction/run` route does the
-same.
+**Worker.** The daily `morning_briefing` job (08:00 Asia/Seoul,
+`worker/scheduler.py`, §4i) regenerates and persists a fresh prediction (and the
+news daily brief) so `/prediction/latest` and `/brief` stay current without a
+manual `POST`. It pulls `repositories.recent_headlines` first and passes them to
+`PredictionService.generate(news_headlines=...)`, so the scheduled prediction is
+**news-aware** (§4f); the `POST /prediction/run` and `POST /api/v1/notify/morning`
+routes do the same.
 
 ---
 
@@ -628,6 +654,90 @@ reconciliation card); see §7.
 
 ---
 
+## 4h. News daily brief (a news roundup, distinct from the prediction report)
+
+The **news daily brief** is a *news roundup* — a themed digest that **summarizes
+the day's scraped headlines** — and is a **separate artifact from the prediction
+report** (§4e). The prediction report (`MarketPrediction`) is the *forecast*; the
+news daily brief (`NewsBrief`) is a *news summary* (ADR-020). They have different
+schemas, tables, and endpoints.
+
+- **Schema (`domain/news_brief.py`).** `NewsBrief` (`NEWS_BRIEF_SCHEMA_VERSION =
+  "1.0.0"`) carries `date` (KST `YYYY-MM-DD`), `item_count`, `summary` (the
+  single-narrative roundup), `market_read` (one line linking the news to the house
+  view), `themes` (a list of `NewsTheme`, each `topic`/`count`/`headlines`), a
+  `generated_by` (`"rule"` deterministic / `"llm"`), and `created_at`. All models
+  are `extra="forbid"`.
+- **Deterministic builder (`newsfeed/brief_builder.py`).** `build_news_brief(date_kst,
+  rows, prediction, *, generated_by="rule")` groups the day's `NewsItemRow`s **by
+  topic** (newest first within a theme; themes ordered by descending count), keeps
+  up to 4 headlines per theme, and composes one continuous Korean `summary` plus a
+  one-line `market_read`. No LLM call — same input yields the same brief.
+- **`market_read` tie-in.** `_market_read` reads the **latest prediction** and ties
+  the news to its `regime`/`direction`/`confidence` ("에이전트 21인의 데스크
+  토의·수석 조율 결과, 시장은 <regime> 국면(<direction>, 확신 NN%)으로 읽힌다 —
+  <headline>"). If no prediction exists yet it says so honestly — the brief
+  **references** the forecast, it does not replace it.
+- **Service (`newsfeed/service.py`).** `NewsService.generate_daily_brief(session,
+  *, date_kst=None)` gathers that KST day's `list_news` rows + the latest prediction
+  (`get_latest_prediction`), calls `build_news_brief`, and persists via
+  `save_daily_brief` (commit).
+- **Per-day upsert + table.** Briefs live in `daily_briefs` (`DailyBriefRow`, PK =
+  `date_kst` `String(10)`), **one row per KST day**, upserted by `date_kst`
+  (`repositories.save_daily_brief`: update if present, else insert) so regenerating
+  a day never accumulates rows. Scalar columns (`summary`/`market_read`/
+  `item_count`/`generated_by`/`created_at`) index the latest view; the full
+  `NewsBrief` lives in `payload` (`JSON`). Added by migration
+  `alembic/versions/0005_daily_briefs.py` (revision `0005`, down-revision `0004`).
+- **Endpoints (`api/routes/news.py`, under `/api/v1`).** `GET /news/brief` returns
+  the latest stored brief (404 until the first run); `POST /news/brief/run` builds
+  and persists today's brief now. Both respond with a `NewsBrief`.
+
+## 4i. Morning briefing → Telegram (08:00 Asia/Seoul)
+
+A single daily job refreshes everything and pushes it to Telegram, so the user
+receives the day's **prediction report + news daily brief** each morning without
+opening the web app (ADR-021).
+
+- **Pipeline (`briefing/service.py`).** `run_morning_briefing(session)` runs, in
+  order: (1) `NewsService().scrape` (scrape + retention prune, §4f); (2)
+  `repositories.recent_headlines` → `PredictionService().generate(...)` →
+  `save_prediction` (the news-aware prediction report, §4e); (3)
+  `NewsService().generate_daily_brief` (the news brief, §4h); (4) render **two**
+  Telegram messages — `format_report_message` (the prediction report: subject /
+  horizon / direction / confidence / regime / headline / KODEX-인버스-곱버스
+  stances / Chief note) and `format_brief_message` (the news brief: summary +
+  themed headlines), both HTML with `html.escape`; (5) `send_telegram_message` for
+  each. It returns a `BriefingResult` (news added, prediction direction, brief
+  item count, the two rendered messages, each send's status, `telegram_enabled`).
+- **Telegram transport (`infrastructure/telegram.py`).** `send_telegram_message`
+  posts to the Bot API `sendMessage` (`disable_web_page_preview=True`). It
+  **never raises**: when `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` are unset it
+  **skips** the call and returns `TelegramResult(ok=False, "telegram not
+  configured …")`; on any `httpx.HTTPError` or non-200 it returns `ok=False` with a
+  reason. So a missing token means "data refreshed, delivery skipped" — the job
+  never fails on transport. The token is read via `get_secret_value()` and is
+  **never logged or returned** (`SecretStr`, ADR-006 redaction).
+- **Worker cron (`worker/scheduler.py`).** `build_scheduler` registers the
+  `morning_briefing` job on `CronTrigger(hour=settings.morning_briefing_hour,
+  minute=settings.morning_briefing_minute, timezone="Asia/Seoul")` (id
+  `morning_briefing`). The scheduler's base tz is `"UTC"`, but **this trigger is
+  Asia/Seoul**, so the defaults fire at **08:00 KST** (`morning_briefing_hour=8`,
+  `morning_briefing_minute=0`). **The worker process (`apps/worker/main.py`) must
+  be running** for the auto-delivery; running only `api`/`web` means no 08:00 push.
+- **Manual trigger (`api/routes/notify.py`).** `POST /api/v1/notify/morning` runs
+  the **same** `run_morning_briefing` pipeline on demand and returns the rendered
+  messages + Telegram status (`MorningBriefingResponse`) — useful to preview/test
+  the briefing without waiting for the cron or configuring a bot token.
+- **Config (`config.py`).** `telegram_bot_token` (`SecretStr`), `telegram_chat_id`,
+  `morning_briefing_hour` (default `8`), `morning_briefing_minute` (default `0`).
+  `Settings.telegram_enabled` (`bool(token and chat_id)`) reports configuration
+  honestly. The prediction/brief generation is unchanged (deterministic,
+  display-only, no order authority), so this push path touches no trading-safety
+  invariant.
+
+---
+
 ## 5. Persistence
 
 The same ORM and the same single Alembic migration run on both backends; the
@@ -651,10 +761,11 @@ ADR-012):
 - Alembic uses `render_as_batch=True` (`alembic/env.py`) so SQLite ALTERs work,
   and pulls the URL from `Settings`.
 
-The eleven tables (`db/models.py`); migration `alembic/versions/0001_initial.py`
-creates the first six, `0002_paper_trading.py` adds `orders` / `fills` /
-`positions`, `0003_predictions.py` adds `market_predictions`, and
-`0004_news.py` adds `news_items`:
+The twelve tables (`db/models.py`); **five migrations** under
+`alembic/versions/`: `0001_initial.py` creates the first six,
+`0002_paper_trading.py` adds `orders` / `fills` / `positions`,
+`0003_predictions.py` adds `market_predictions`, `0004_news.py` adds `news_items`,
+and `0005_daily_briefs.py` adds `daily_briefs`:
 
 | Table | Model | Notes |
 |---|---|---|
@@ -666,8 +777,9 @@ creates the first six, `0002_paper_trading.py` adds `orders` / `fills` /
 | `orders` | `OrderRow` | a paper order + lifecycle (`status`); unique `idempotency_key`; FK target of `fills`; prices via `DecimalString` (migration `0002`). |
 | `fills` | `FillRow` | one simulated fill; FK → `orders.id`; `price` via `DecimalString` (migration `0002`). |
 | `positions` | `PositionRow` | **composite PK `(account, symbol)`**; signed `quantity`, `avg_cost`, `realized_pnl` via `DecimalString` (migration `0002`). |
-| `market_predictions` | `PredictionRow` | one stored house prediction + daily brief; scalar columns (`as_of`/`direction`/`confidence`/`regime`/`headline`/`brief`/`generated_by`/`agent_count`) index the latest view, the full `MarketPrediction` lives in `payload` (`JSON`); `created_at` indexed for "latest" (migration `0003`). |
+| `market_predictions` | `PredictionRow` | one stored **prediction report** (the forecast, with its own narrative `brief` field); scalar columns (`as_of`/`direction`/`confidence`/`regime`/`headline`/`brief`/`generated_by`/`agent_count`) index the latest view, the full `MarketPrediction` lives in `payload` (`JSON`); `created_at` indexed for "latest" (migration `0003`). Distinct from `daily_briefs` (§4h). |
 | `news_items` | `NewsItemRow` | one scraped headline; `id` PK (stable `sha256` of the URL, dedup target); `date_kst` (indexed) groups by Korean calendar day; `topic`/`published_at` indexed; pruned past `news_retention_days` (§4f, migration `0004`). |
+| `daily_briefs` | `DailyBriefRow` | one **news daily brief** (news roundup, §4h) per KST day; **PK `date_kst`** (`String(10)`), upserted by day; scalar columns (`summary`/`market_read`/`item_count`/`generated_by`/`created_at`) index the latest, the full `NewsBrief` lives in `payload` (`JSON`); `created_at` indexed (migration `0005`). A *separate artifact* from `market_predictions`. |
 | `audit_logs` | `AuditLogRow` | **append-only** (ADR-006) — application code only inserts (`add_audit_log`); autoincrement integer id. |
 
 On `api` startup the lifespan runs `Base.metadata.create_all` (dev convenience;
@@ -695,8 +807,10 @@ a no-op once Alembic has built the schema) and seeds instruments idempotently.
   LLM-free. `ApprovedOrder` is type-coupled to an `APPROVED` `RiskDecision`.
 - **Secrets as `SecretStr`, never logged or returned.** All credentials in
   `Settings` (`anthropic_api_key`, `kis_*`, `kiwoom_*`, `dart_api_key`,
-  `ecos_api_key`, `naver_*`) are `pydantic.SecretStr` and appear in no response
-  schema (`api/schemas/responses.py`), so they cannot be serialised by accident.
+  `ecos_api_key`, `naver_*`, `telegram_bot_token`) are `pydantic.SecretStr` and
+  appear in no response schema (`api/schemas/responses.py`), so they cannot be
+  serialised by accident. The Telegram sender reads its token via
+  `get_secret_value()` only and never logs it (§4i).
 - **Honest health reporting.** `infrastructure/redis_client.py` falls back to an
   in-memory `fakeredis` when `REDIS_URL` is unset or a real Redis is
   unreachable, and reports the backend truthfully (`backend="fakeredis"`).

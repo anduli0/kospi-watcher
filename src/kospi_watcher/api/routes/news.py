@@ -7,7 +7,7 @@ POST /news/scrape   — fetch the configured topics, store new, prune old
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from kospi_watcher.api.deps import SessionDep
 from kospi_watcher.api.schemas.responses import (
@@ -18,10 +18,24 @@ from kospi_watcher.api.schemas.responses import (
     ScrapeResponse,
 )
 from kospi_watcher.db import repositories
+from kospi_watcher.domain.news_brief import NewsBrief
 from kospi_watcher.newsfeed.service import NewsService
 
 router = APIRouter(tags=["news"])
 _service = NewsService()
+
+
+@router.get("/news/brief", response_model=NewsBrief)
+async def latest_daily_brief(session: SessionDep) -> NewsBrief:
+    row = await repositories.get_latest_daily_brief(session)
+    if row is None:
+        raise HTTPException(status_code=404, detail="no brief yet; POST /news/brief/run")
+    return NewsBrief.model_validate(row.payload)
+
+
+@router.post("/news/brief/run", response_model=NewsBrief)
+async def run_daily_brief(session: SessionDep) -> NewsBrief:
+    return await _service.generate_daily_brief(session)
 
 
 @router.get("/news", response_model=NewsListResponse)
