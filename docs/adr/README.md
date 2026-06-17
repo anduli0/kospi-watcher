@@ -25,5 +25,7 @@
 | [ADR-013](ADR-013-market-data-yahoo.md) | 키리스 Yahoo Finance 시세 provider + mock 폴백 | Accepted (2026-06-17) |
 | [ADR-014](ADR-014-paper-execution.md) | PAPER(모의) 실행을 안전한 실행 계층으로 구현 | Accepted (2026-06-17) |
 | [ADR-015](ADR-015-llm-agent-runtime.md) | 실 LLM(Anthropic) 에이전트 런타임 + mock 폴백 | Accepted (2026-06-17) |
+| [ADR-016](ADR-016-agent-org-hierarchy.md) | 계층형 리서치 데스크 조직 (5데스크+Chief·3티어·가중·리드) | Accepted (2026-06-17) |
+| [ADR-017](ADR-017-prediction-and-brief.md) | 결정론적 예측 종합기 + 데일리 브리핑 + 롱/숏 스탠스(인버스/곱버스) | Accepted (2026-06-17) |
 
-> ADR-001~010은 원본 스펙 §17이 지정한 ADR이고, ADR-011·ADR-012는 킥오프 오버레이 F항에 따라 추가된 패키징·툴체인 결정이다. ADR-013~015는 시세·모의 실행·LLM 런타임 세 신규 기능 도입에 따른 결정이다.
+> ADR-001~010은 원본 스펙 §17이 지정한 ADR이고, ADR-011·ADR-012는 킥오프 오버레이 F항에 따라 추가된 패키징·툴체인 결정이다. ADR-013~015는 시세·모의 실행·LLM 런타임 세 신규 기능 도입에 따른 결정이다. ADR-016·ADR-017은 제품 무게중심을 예측·데일리 브리핑으로 옮기며 도입한 계층형 데스크 조직과 결정론적 예측 종합기 결정이다.

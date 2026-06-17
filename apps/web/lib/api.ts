@@ -128,6 +128,90 @@ export interface MarketQuote {
   stale: boolean;
 }
 
+export type Direction = "BULLISH" | "BEARISH" | "NEUTRAL";
+export type StanceLabel = "OVERWEIGHT" | "NEUTRAL" | "UNDERWEIGHT" | "AVOID";
+
+export interface DeskView {
+  desk: string;
+  title: string;
+  lean: Direction;
+  conviction: number;
+  weight: number;
+  score: number;
+  member_count: number;
+  responded: number;
+  summary: string;
+  top_drivers: string[];
+}
+
+export interface InstrumentStance {
+  symbol: string;
+  name: string;
+  kind: string;
+  label: StanceLabel;
+  rationale: string;
+  risk_note: string | null;
+}
+
+export interface Scenario {
+  name: string;
+  probability: number;
+  thesis: string;
+  triggers: string[];
+}
+
+export interface MarketPrediction {
+  prediction_id: string;
+  as_of: string;
+  horizon: string;
+  regime: string;
+  direction: Direction;
+  confidence: number;
+  data_quality: string;
+  headline: string;
+  brief: string;
+  desk_views: DeskView[];
+  instrument_stances: InstrumentStance[];
+  scenarios: Scenario[];
+  generated_by: string;
+  agent_count: number;
+}
+
+export interface BriefStance {
+  symbol: string;
+  name: string;
+  kind: string;
+  label: StanceLabel;
+  risk_note: string | null;
+}
+
+export interface BriefResponse {
+  as_of: string;
+  generated_by: string;
+  agent_count: number;
+  direction: Direction;
+  confidence: number;
+  regime: string;
+  headline: string;
+  brief: string;
+  stances: BriefStance[];
+}
+
+export interface OrgDeskInfo {
+  key: string;
+  title: string;
+  tier: string;
+  weight: number;
+  lead: string;
+  members: string[];
+}
+
+export interface OrgResponse {
+  desks: OrgDeskInfo[];
+  tiers: string[];
+  agent_count: number;
+}
+
 export interface MarketQuotesResponse {
   provider: string;
   count: number;
@@ -257,6 +341,14 @@ export const api = {
   listOrders: (limit = 50) => request<OrderListResponse>(`/api/v1/orders?limit=${limit}`),
   positions: () => request<PositionResponse[]>("/api/v1/positions"),
   account: () => request<AccountResponse>("/api/v1/account"),
+  runPrediction: (universe: string[] = []) =>
+    request<MarketPrediction>("/api/v1/prediction/run", {
+      method: "POST",
+      body: JSON.stringify({ agent_name: "synthesis", universe }),
+    }),
+  latestPrediction: () => request<MarketPrediction>("/api/v1/prediction/latest"),
+  brief: () => request<BriefResponse>("/api/v1/brief"),
+  agentsOrg: () => request<OrgResponse>("/api/v1/agents/org"),
   validateProposal: (proposal: OrderProposalInput) =>
     request<{ valid: boolean; proposal_id: string; detail: string }>(
       "/api/v1/order-proposals/validate",

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kospi_watcher.db import models
 from kospi_watcher.domain.agents.schemas import AgentRun
 from kospi_watcher.domain.enums import AuditAction
+from kospi_watcher.domain.prediction.schemas import MarketPrediction
 from kospi_watcher.domain.risk.schemas import OrderProposal, RiskDecision
 from kospi_watcher.domain.time import now_utc
 
@@ -197,3 +198,39 @@ async def list_positions(
         .order_by(models.PositionRow.symbol)
     )
     return (await session.execute(stmt)).scalars().all()
+
+
+# --- Predictions ---
+
+
+async def save_prediction(
+    session: AsyncSession, prediction: MarketPrediction
+) -> models.PredictionRow:
+    row = models.PredictionRow(
+        id=prediction.prediction_id,
+        as_of=prediction.as_of,
+        horizon=prediction.horizon.value,
+        direction=prediction.direction.value,
+        confidence=prediction.confidence,
+        regime=prediction.regime.value,
+        headline=prediction.headline,
+        brief=prediction.brief,
+        generated_by=prediction.generated_by,
+        agent_count=prediction.agent_count,
+        payload=prediction.model_dump(mode="json"),
+        created_at=now_utc(),
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def get_latest_prediction(
+    session: AsyncSession,
+) -> models.PredictionRow | None:
+    stmt = (
+        select(models.PredictionRow)
+        .order_by(desc(models.PredictionRow.created_at))
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalars().first()

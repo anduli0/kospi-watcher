@@ -162,6 +162,26 @@ class PositionRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class PredictionRow(Base):
+    """A stored house prediction + daily brief. The full MarketPrediction is kept
+    in ``payload``; scalar columns index the latest view."""
+
+    __tablename__ = "market_predictions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    horizon: Mapped[str] = mapped_column(String(16))
+    direction: Mapped[str] = mapped_column(String(16))
+    confidence: Mapped[float] = mapped_column(Float)
+    regime: Mapped[str] = mapped_column(String(24))
+    headline: Mapped[str] = mapped_column(Text)
+    brief: Mapped[str] = mapped_column(Text)
+    generated_by: Mapped[str] = mapped_column(String(16))
+    agent_count: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class AuditLogRow(Base):
     """Append-only audit log. No update/delete path exists in application code
     (ADR-006). New rows only."""

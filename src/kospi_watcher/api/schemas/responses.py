@@ -153,6 +153,41 @@ class SubmitOrderResponse(BaseModel):
     position: PositionResponse | None
 
 
+class BriefStance(BaseModel):
+    symbol: str
+    name: str
+    kind: str
+    label: str
+    risk_note: str | None = None
+
+
+class BriefResponse(BaseModel):
+    as_of: datetime
+    generated_by: str
+    agent_count: int
+    direction: str
+    confidence: float
+    regime: str
+    headline: str
+    brief: str
+    stances: list[BriefStance]
+
+
+class OrgDeskInfo(BaseModel):
+    key: str
+    title: str
+    tier: str
+    weight: float
+    lead: str
+    members: list[str]
+
+
+class OrgResponse(BaseModel):
+    desks: list[OrgDeskInfo]
+    tiers: list[str]
+    agent_count: int
+
+
 class AuditLogEntry(BaseModel):
     id: int
     action: str

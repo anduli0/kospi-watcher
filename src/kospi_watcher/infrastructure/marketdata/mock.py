@@ -15,7 +15,10 @@ from kospi_watcher.infrastructure.marketdata.base import Quote
 
 _MOCK_PRICES: dict[str, tuple[Decimal, str]] = {
     "069500": (Decimal("35000"), "KRW"),
+    "122630": (Decimal("18000"), "KRW"),
     "102110": (Decimal("36500"), "KRW"),
+    "114800": (Decimal("4200"), "KRW"),
+    "252670": (Decimal("2300"), "KRW"),
     "229200": (Decimal("12500"), "KRW"),
     "KOSPI": (Decimal("2700.00"), "KRW"),
     "USDKRW": (Decimal("1350.00"), "KRW"),

@@ -103,3 +103,114 @@ export function ErrorNote({ error }: { error: string }) {
 export function Loading() {
   return <p className="text-sm text-muted">불러오는 중…</p>;
 }
+
+// --- Domain labels & colors (Korea convention: up=red, down=blue) ---
+
+export const DIRECTION_KO: Record<string, string> = {
+  BULLISH: "강세",
+  BEARISH: "약세",
+  NEUTRAL: "중립",
+};
+
+export const REGIME_KO: Record<string, string> = {
+  RISK_ON_STRONG: "강한 위험선호",
+  RISK_ON_FRAGILE: "취약한 위험선호",
+  LIQUIDITY_RALLY: "유동성 랠리",
+  EARNINGS_RALLY: "실적 랠리",
+  SIDEWAYS_LOW_VOL: "저변동성 횡보",
+  SIDEWAYS_HIGH_VOL: "고변동성 횡보",
+  RISK_OFF: "위험회피",
+  CRISIS: "위기",
+  DATA_UNCERTAIN: "데이터 불확실",
+};
+
+export const STANCE_KO: Record<string, string> = {
+  OVERWEIGHT: "비중확대",
+  NEUTRAL: "중립",
+  UNDERWEIGHT: "비중축소",
+  AVOID: "회피",
+};
+
+export const KIND_KO: Record<string, string> = {
+  LONG_1X: "롱 (1x)",
+  LONG_2X: "레버리지 (2x)",
+  INVERSE_1X: "인버스 (-1x)",
+  INVERSE_2X: "곱버스 (-2x)",
+};
+
+/** Text color for a market direction (강세=red, 약세=blue, 중립=muted). */
+export function dirText(direction: string): string {
+  return direction === "BULLISH"
+    ? "text-up"
+    : direction === "BEARISH"
+      ? "text-down"
+      : "text-muted";
+}
+
+export function DirectionPill({ direction, big = false }: { direction: string; big?: boolean }) {
+  const tone =
+    direction === "BULLISH"
+      ? "border-up/40 bg-up/10 text-up"
+      : direction === "BEARISH"
+        ? "border-down/40 bg-down/10 text-down"
+        : "border-border bg-elevated text-muted";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border font-semibold ${tone} ${
+        big ? "px-3 py-1 text-sm" : "px-2 py-0.5 text-xs"
+      }`}
+    >
+      {direction === "BULLISH" ? "▲" : direction === "BEARISH" ? "▼" : "■"}{" "}
+      {DIRECTION_KO[direction] ?? direction}
+    </span>
+  );
+}
+
+export function RegimeBadge({ regime }: { regime: string }) {
+  const danger = regime === "CRISIS" || regime === "RISK_OFF" || regime === "DATA_UNCERTAIN";
+  return (
+    <span
+      className={
+        "rounded-full border px-3 py-1 font-mono text-xs font-semibold " +
+        (danger
+          ? "border-danger/40 bg-danger/10 text-danger"
+          : "border-accent/40 bg-accent/10 text-accent")
+      }
+    >
+      {REGIME_KO[regime] ?? regime}
+    </span>
+  );
+}
+
+export function StanceBadge({ label }: { label: string }) {
+  const tone =
+    label === "OVERWEIGHT"
+      ? "border-accent/40 bg-accent/10 text-accent"
+      : label === "AVOID"
+        ? "border-danger/40 bg-danger/10 text-danger"
+        : label === "UNDERWEIGHT"
+          ? "border-warning/40 bg-warning/10 text-warning"
+          : "border-border bg-elevated text-muted";
+  return (
+    <span className={`rounded-md border px-2 py-0.5 font-mono text-xs font-semibold ${tone}`}>
+      {STANCE_KO[label] ?? label}
+    </span>
+  );
+}
+
+/** A signed conviction bar centered at 0: 약세(blue) ← → 강세(red). */
+export function LeanBar({ score }: { score: number }) {
+  const pct = Math.max(-1, Math.min(1, score)) * 50; // -50..50
+  const left = pct >= 0 ? 50 : 50 + pct;
+  const width = Math.abs(pct);
+  const color = score > 0.05 ? "bg-up" : score < -0.05 ? "bg-down" : "bg-muted";
+  return (
+    <div className="relative h-2 w-full rounded-full bg-elevated">
+      <div className="absolute left-1/2 top-0 h-2 w-px -translate-x-1/2 bg-border" />
+      <div
+        className={`absolute top-0 h-2 rounded-full ${color}`}
+        style={{ left: `${left}%`, width: `${width}%` }}
+      />
+    </div>
+  );
+}

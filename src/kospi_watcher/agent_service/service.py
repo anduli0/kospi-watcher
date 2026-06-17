@@ -9,6 +9,7 @@ Neither runtime can place an order — agents only analyse.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -100,4 +101,11 @@ class AgentService:
             model_name=settings.agent_model,
             prompt_version=LLM_PROMPT_VERSION,
             findings=findings,
+        )
+
+    async def run_all(self, universe: tuple[str, ...] = ()) -> list[AgentRun]:
+        """Run every agent with the configured runtime. LLM runs go concurrently;
+        each agent still falls back to mock on its own failure."""
+        return list(
+            await asyncio.gather(*(self.run(name, universe) for name in self.names()))
         )

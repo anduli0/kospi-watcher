@@ -15,8 +15,18 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict
 
 from kospi_watcher.domain.money import DecimalNoFloat
 
-# Internal symbols the platform understands in Phase 1.
-KNOWN_SYMBOLS: tuple[str, ...] = ("069500", "102110", "229200", "KOSPI", "USDKRW")
+# Internal symbols the platform understands. Includes the long/short leverage
+# ladder used by predictions (1x/2x long, 1x/2x inverse).
+KNOWN_SYMBOLS: tuple[str, ...] = (
+    "069500",  # KODEX 200 (1x long)
+    "122630",  # KODEX 레버리지 (2x long)
+    "102110",  # TIGER 200 (1x long)
+    "114800",  # KODEX 인버스 (1x short)
+    "252670",  # KODEX 200선물인버스2X (곱버스, 2x short)
+    "229200",  # KODEX KOSDAQ150
+    "KOSPI",
+    "USDKRW",
+)
 
 
 class Quote(BaseModel):

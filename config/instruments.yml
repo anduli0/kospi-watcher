@@ -29,6 +29,21 @@ instruments:
     instrument_type: "ETF"
     market: "KOSPI200"
     tradable: true
+  - symbol: "122630"
+    name: "KODEX 레버리지"
+    instrument_type: "ETF"
+    market: "KOSPI200"
+    tradable: false
+  - symbol: "114800"
+    name: "KODEX 인버스"
+    instrument_type: "ETF"
+    market: "KOSPI200"
+    tradable: false
+  - symbol: "252670"
+    name: "KODEX 200선물인버스2X"
+    instrument_type: "ETF"
+    market: "KOSPI200"
+    tradable: false
   - symbol: "229200"
     name: "KODEX KOSDAQ150"
     instrument_type: "ETF"

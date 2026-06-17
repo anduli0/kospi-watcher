@@ -93,6 +93,24 @@ class MarketRegime(StrEnum):
     DATA_UNCERTAIN = "DATA_UNCERTAIN"
 
 
+class InstrumentKind(StrEnum):
+    """Directional/leverage class of a tradable index product (for predictions)."""
+
+    LONG_1X = "LONG_1X"  # tracks KOSPI200 (e.g. KODEX 200)
+    LONG_2X = "LONG_2X"  # 2x leveraged long (e.g. KODEX 레버리지)
+    INVERSE_1X = "INVERSE_1X"  # -1x inverse (e.g. KODEX 인버스)
+    INVERSE_2X = "INVERSE_2X"  # -2x leveraged inverse ("곱버스", KODEX 200선물인버스2X)
+
+
+class StanceLabel(StrEnum):
+    """House stance on an instrument given the market view."""
+
+    OVERWEIGHT = "OVERWEIGHT"
+    NEUTRAL = "NEUTRAL"
+    UNDERWEIGHT = "UNDERWEIGHT"
+    AVOID = "AVOID"
+
+
 class OrderSide(StrEnum):
     BUY = "BUY"
     SELL = "SELL"

@@ -30,7 +30,10 @@ _DEFAULT_UA = (
 # Internal symbol -> Yahoo symbol.
 _SYMBOL_MAP: dict[str, str] = {
     "069500": "069500.KS",
+    "122630": "122630.KS",
     "102110": "102110.KS",
+    "114800": "114800.KS",
+    "252670": "252670.KS",
     "229200": "229200.KS",
     "KOSPI": "^KS11",
     "USDKRW": "KRW=X",

@@ -465,4 +465,58 @@ AUTO_EXECUTION_ENABLED=false
 
 ---
 
-> **요약:** KOSPI-WATCHER는 "분석은 LLM, 실행은 deterministic 코드"라는 경계 위에 세워진, 안전 우선의 한국 증시 분석·트레이딩 리서치 시스템이다. 이번 빌드는 Phase 0/1만, 전부 mock, 실거래 없음이며, 모든 안전 불변식은 테스트로 강제된다.
+## 12. 예측 엔진 & 데일리 브리핑 (Prediction Engine & Daily Brief)
+
+> 본 장은 형제 시스템(Fed-Watcher, KRW-Watcher)과 같이 제품의 **무게중심을 "예측 + 데일리 브리핑"**으로 이동시킨다. 트레이딩(모의/페이퍼)은 **부차적**이며 안전 게이트 뒤에 머문다(§5, §6.1의 P2 기능). 상세 동작은 `docs/ARCHITECTURE.md` §4d·§4e, `docs/AGENT_DESIGN.md` §7, ADR-016·ADR-017 참조.
+
+### 12.1 제품 강조점 — 예측 + 브리핑이 1차 산출물
+
+KOSPI-WATCHER의 **1차 산출물**은 매 실행마다 생성되는 **하우스 시장 예측(house market prediction)**과 그에 딸린 **단일 서사형 한국어 데일리 브리핑**이다. 21개 분석 에이전트의 finding을 종합해 (a) 오늘의 **시장 국면(regime)**, (b) **방향성(direction)·확신도(confidence)**, (c) **롱/인버스/곱버스 포지셔닝**, (d) **3개 시나리오**, (e) 이를 하나의 이야기로 엮은 **브리핑**을 제시한다.
+
+핵심 원칙은 §1.3을 그대로 따른다: **예측 종합기(synthesizer)는 deterministic 코드**다. 에이전트 finding이 mock 런타임에서 왔든 실제 LLM 런타임에서 왔든, 동일한 finding 집합이면 동일한 예측이 나온다(`generated_by`에 입력 출처만 `"mock"|"llm"`으로 정직히 기록). 즉 "분석(가변)은 에이전트, 종합·확률·포지셔닝(불변)은 결정론 코드"라는 경계가 예측 단계에도 그대로 적용된다.
+
+### 12.2 계층형 리서치 데스크 조직 (5 데스크 + Chief, 3 티어)
+
+21개 에이전트는 평평한 목록이 아니라 **리서치 회사**처럼 조직된다(`domain/agents/org.py`, ADR-016). 5개 **데스크**(각 *리드* 지정)가 1명의 **Chief**에게 보고하며, 작업은 **티어** 순으로 흐른다: `VALIDATE → ANALYZE → SYNTHESIZE`. 각 분석 데스크는 Chief 종합 시 사용하는 **방향성 가중치(weight)**를 가진다.
+
+| 데스크 | 티어 | 가중치 | 리드 | 멤버 수 |
+|---|---|---|---|---|
+| `DATA_INTEGRITY` (데이터·검증) | `VALIDATE` | 0.10 | Market Data Integrity Agent | 3 |
+| `MACRO` (거시·국제) | `ANALYZE` | 0.24 | Korea Macro Agent | 6 |
+| `FLOW_TECH` (수급·기술) | `ANALYZE` | 0.26 | Foreign and Institutional Flow Agent | 4 |
+| `FUNDAMENTAL` (실적·섹터) | `ANALYZE` | 0.24 | Earnings and Valuation Agent | 5 |
+| `RISK` (리스크·레드팀) | `ANALYZE` | 0.16 | Red-Team and Risk Agent | 2 |
+| `CHIEF` (수석 신디사이저) | `SYNTHESIZE` | 0.00 | Chief Market Synthesizer | 1 |
+
+데스크 뷰는 **임팩트×확신, 리드 가중(×1.5)**으로 산출되고, Chief는 이를 **데스크 가중치로 가중합**하여 하우스 방향성·확신도를 만든다(`domain/prediction/synthesizer.py`). `GET /api/v1/agents/org`가 이 조직도를 읽기 전용으로 노출한다.
+
+### 12.3 시장 국면 9종 (재확인)
+
+예측은 §6.2의 **9개 `MarketRegime`** 중 하나로 오늘을 분류한다(`domain/prediction/regime.py`의 `classify_regime`). 예: 약세 + 고위험 + 고확신 → `CRISIS`; 강세 + 고확신 + 저변동 → `RISK_ON_STRONG`; 데이터 불량 → `DATA_UNCERTAIN`. 9종 목록은 §6.2 표와 동일하다.
+
+### 12.4 롱/숏 상품 사다리 (인버스/곱버스)
+
+예측은 **방향성을 실행 가능한 포지셔닝**으로 번역하기 위해 **롱/숏 레버리지 사다리**를 사용한다(`domain/prediction/instruments.py`). 약세 뷰는 단순 "롱 회피"가 아니라 **인버스/곱버스 비중확대(overweight)**로 표현된다.
+
+| 종목코드 | 이름 | `InstrumentKind` | 익스포저 |
+|---|---|---|---|
+| `069500` | KODEX 200 | `LONG_1X` | +1× 롱 |
+| `122630` | KODEX 레버리지 | `LONG_2X` | +2× 롱 |
+| `114800` | KODEX 인버스 | `INVERSE_1X` | −1× 숏 |
+| `252670` | KODEX 200선물인버스2X (**곱버스**) | `INVERSE_2X` | −2× 숏 |
+
+`stance_for(kind, direction, confidence, regime)`가 종목별 `StanceLabel`(`OVERWEIGHT`/`NEUTRAL`/`UNDERWEIGHT`/`AVOID`)을 산출한다. 뷰와 **정합**하는 상품은 확신도가 높을수록 `OVERWEIGHT`로, **역행**하는 상품은 `UNDERWEIGHT`/`AVOID`로 기운다. 모든 **2배 레버리지 상품**(`LONG_2X`, 곱버스 `INVERSE_2X`)은 *"레버리지·일일 리밸런싱에 따른 변동성 손실(데케이) 위험 — 장기 보유 부적합"* 리스크 노트를 달고, 고변동·`CRISIS` 국면에서는 방향이 맞아도 `NEUTRAL`/`AVOID`로 끌린다.
+
+> 주의: 이 종목들은 예측·포지셔닝 **표시용**이다. `config/instruments.yml`에서 `122630`/`114800`/`252670`은 `tradable=false`이고, 매매 경로는 deny-by-default Risk Engine의 `allowed_instruments` 화이트리스트(§6.1 P2, ADR-010)를 별도로 통과해야 한다. 예측이 곧 주문 권한을 의미하지 않는다.
+
+### 12.5 산출물·영속화·엔드포인트·워커
+
+- **산출물:** `MarketPrediction`(`domain/prediction/schemas.py`, `PREDICTION_SCHEMA_VERSION="1.0.0"`) — `regime`, `direction`, `confidence`, `data_quality`, `headline`, 단일 서사 `brief`, `desk_views`, `instrument_stances`, 3개 `scenarios`(확률 합 1.0), `generated_by`(`"mock"|"llm"`), `agent_count`.
+- **브리핑:** 분절 캡션이 아니라 **하나의 한국어 서사**(국면 → 하우스 방향·확신 → 주도 데스크 근거 → 리스크 데스크 경고·무효화 조건 → 롱/인버스/곱버스 포지셔닝)로 작성된다.
+- **영속화:** 새 테이블 `market_predictions`(`PredictionRow`, Alembic `0003_predictions.py`)에 저장된다(스칼라 컬럼 + 전체 `payload` JSON).
+- **엔드포인트(`/api/v1`):** `POST /prediction/run`(전 에이전트 실행→종합→저장→반환), `GET /prediction/latest`, `GET /brief`, `GET /agents/org`.
+- **워커:** `refresh_prediction` 잡이 **30분마다** 예측을 재생성·영속화하여 `/prediction/latest`·`/brief`를 최신으로 유지한다(`worker/scheduler.py`).
+
+---
+
+> **요약:** KOSPI-WATCHER는 "분석은 LLM, 실행은 deterministic 코드"라는 경계 위에 세워진, 안전 우선의 한국 증시 분석·트레이딩 리서치 시스템이다. 제품의 무게중심은 이제 **예측 + 데일리 브리핑**(계층형 5데스크+Chief 조직이 종합, 롱/인버스/곱버스 포지셔닝 포함)이며, 트레이딩은 부차적·페이퍼 한정이다. 모든 안전 불변식은 테스트로 강제되고, 예측 종합기는 mock·LLM finding 위에서 결정론적으로 동작한다.

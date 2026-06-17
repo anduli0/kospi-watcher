@@ -11,9 +11,15 @@ contract. It is written to match the code exactly. The source of truth is:
   Anthropic-backed implementation (forced `emit_finding` tool).
 - `src/kospi_watcher/domain/agents/registry.py` — `AgentRegistry` / run orchestration.
 - `src/kospi_watcher/domain/agents/schemas.py` — `Evidence`, `AgentFinding`, `AgentRun`.
+- `src/kospi_watcher/domain/agents/org.py` — the desk org chart (`Desk`, `Tier`,
+  `DeskSpec`, `AGENT_ORG`); how the 21 agents map to 5 desks + a Chief (§7).
+- `src/kospi_watcher/domain/prediction/` — `instruments.py` (the long/inverse ladder +
+  `stance_for`), `regime.py`, `schemas.py`, and the `synthesizer.py` that aggregates
+  desk views into the house prediction (§7.3, ARCHITECTURE §4e).
 - `src/kospi_watcher/agent_service/service.py` and `app.py` — the isolated service
-  (`run_mock` + the runtime-aware async `run`).
-- `src/kospi_watcher/domain/enums.py` — the enum value sets.
+  (`run_mock`, the runtime-aware async `run`, and the concurrent `run_all`).
+- `src/kospi_watcher/domain/enums.py` — the enum value sets (incl. `InstrumentKind`,
+  `StanceLabel`).
 
 ---
 
@@ -264,6 +270,10 @@ order, i.e. **21 runs** for the default catalog.
   `agent_model` / `agent_max_tokens`, and **falls back to `run_mock` on any
   `LLMAgentError`** (logged as `agent_service.llm_fallback`). Unknown names still raise
   `AgentNotFoundError`.
+- `run_all(universe=())` (async) → runs **every** agent with the configured runtime
+  **concurrently** (`asyncio.gather`); each agent still falls back to mock on its own
+  failure. This is what `PredictionService.generate` (§7.3, ARCHITECTURE §4e) consumes to
+  build a house prediction from one full sweep of findings.
 
 ### Isolated agent-service (`agent_service/app.py`)
 
@@ -334,3 +344,111 @@ grants none, and `LLMAgent` adds no submit/order surface (its system prompt also
 "You ONLY analyse — you have no authority to place orders"). Only the deterministic Risk
 Engine can gate orders; the analysis layer's job ends at emitting findings. A breaking
 change to the finding shape (and only such a change) bumps `AGENT_FINDING_SCHEMA_VERSION`.
+
+---
+
+## 7. Organization & orchestration
+
+The 21 agents are not run as a flat list — they are organised as a research firm
+(`src/kospi_watcher/domain/agents/org.py`, ADR-016). Five **desks**, each with a
+designated *lead*, feed a single **Chief** synthesizer, and work runs in **tiers**.
+`org.py` is **pure metadata over `catalog.py`** — it runs nothing; the actual
+orchestration lives in `domain/prediction/synthesizer.py` (§8 below / ARCHITECTURE §4e).
+
+### 7.1 The desk roster
+
+`AGENT_ORG` is a tuple of `DeskSpec(key, title_ko, tier, weight, lead, members)`.
+Member names **must** match `catalog.py` exactly; module-level assertions enforce that the
+desks cover **all 21 catalog agents** and that the membership counts sum to 21.
+
+| Desk (`Desk`) | Title (KO) | Tier (`Tier`) | Weight | Lead | Members |
+|---|---|---|---|---|---|
+| `DATA_INTEGRITY` | 데이터·검증 데스크 | `VALIDATE` | 0.10 | Market Data Integrity Agent | 3 |
+| `MACRO` | 거시·국제 데스크 | `ANALYZE` | 0.24 | Korea Macro Agent | 6 |
+| `FLOW_TECH` | 수급·기술 데스크 | `ANALYZE` | 0.26 | Foreign and Institutional Flow Agent | 4 |
+| `FUNDAMENTAL` | 실적·섹터 데스크 | `ANALYZE` | 0.24 | Earnings and Valuation Agent | 5 |
+| `RISK` | 리스크·레드팀 데스크 | `ANALYZE` | 0.16 | Red-Team and Risk Agent | 2 |
+| `CHIEF` | 수석 신디사이저 | `SYNTHESIZE` | 0.00 | Chief Market Synthesizer | 1 |
+
+Desk membership (verbatim from `org.py`):
+
+- **`DATA_INTEGRITY`** (lead *Market Data Integrity Agent*): Market Data Integrity Agent,
+  News Deduplication Agent, Source Verification Agent.
+- **`MACRO`** (lead *Korea Macro Agent*): Korea Macro Agent, Global Growth Agent, Rates and
+  Liquidity Agent, FX Agent, Commodity and Energy Agent, Geopolitics and Trade Agent.
+- **`FLOW_TECH`** (lead *Foreign and Institutional Flow Agent*): Foreign and Institutional
+  Flow Agent, Derivatives and Program Agent, Breadth and Technical Agent, Volatility and
+  Regime Agent.
+- **`FUNDAMENTAL`** (lead *Earnings and Valuation Agent*): Earnings and Valuation Agent,
+  Technology and Semiconductor Agent, Industrial and Export Agent, Domestic Demand and
+  Defensive Agent, Structural Growth Scout.
+- **`RISK`** (lead *Red-Team and Risk Agent*): Red-Team and Risk Agent, Disclosure and
+  Corporate Event Agent.
+- **`CHIEF`** (lead *Chief Market Synthesizer*): Chief Market Synthesizer.
+
+Helpers: `desk_of(name)`, `desk_spec(key)`, `is_lead(name)`; the derived tuples
+`ANALYSIS_DESKS` (everything but `CHIEF`) and `DIRECTIONAL_DESKS` (the four `ANALYZE`
+desks). `GET /api/v1/agents/org` returns this chart read-only (`OrgResponse`).
+
+### 7.2 The three tiers (run order)
+
+`Tier` is the execution order — lower tiers run (and inform) first:
+
+1. **`VALIDATE`** (tier 0) — the data-quality gate (`DATA_INTEGRITY`). Its members'
+   `data_quality` flags decide whether the whole synthesis is trustworthy or degrades to
+   the `DATA_UNCERTAIN` regime.
+2. **`ANALYZE`** (tier 1) — the four directional desks (`MACRO`, `FLOW_TECH`,
+   `FUNDAMENTAL`, `RISK`), conceptually parallel; only these carry directional weight.
+3. **`SYNTHESIZE`** (tier 2) — the `CHIEF`, which combines the desk views into the house
+   prediction (weight 0 — it composes, it does not vote).
+
+### 7.3 How desk views aggregate into the Chief's synthesis
+
+Aggregation is deterministic (`synthesizer.py`):
+
+- **Within a desk** (`_desk_view`): each member finding contributes
+  `sign(direction) × weight × confidence`, where `weight = impact_weight × lead_bonus`
+  (`impact` LOW 1 / MEDIUM 2 / HIGH 3; the desk **lead** gets a ×1.5 bonus). The desk's
+  signed `score` is the weighted contribution normalised by the total weight; that gives
+  the desk's `lean` (BULLISH/BEARISH/NEUTRAL past a ±0.15 band) and `conviction`
+  (`min(1, |score|)`), plus its top two drivers.
+- **Across desks (Chief):** `overall_score = Σ(desk.weight × desk.score)` over all desks.
+  The house `direction` is the lean of that score (±0.12 band) and `confidence` scales with
+  `|overall_score|` (`0.40 + 0.8·|score|`, capped 0.95). The **top desk** (largest
+  `|weight × score|` among the directional desks) helps pick the regime, and the brief is
+  written around that lead desk and the Risk desk's caveat.
+
+In short: **impact × confidence, lead-weighted within a desk; desk-weight-weighted across
+desks.** Because every step is pure, the same findings always yield the same prediction —
+identical over the mock and the real-LLM runtime.
+
+### 7.4 Instrument stances (long / inverse / 곱버스)
+
+The synthesizer turns the house view into an actionable stance over a **long/short
+leverage ladder** (`domain/prediction/instruments.py`), so a *bearish* call is expressed as
+an **inverse / leveraged-inverse overweight**, not merely "avoid long":
+
+| Symbol | Name | `InstrumentKind` | Exposure |
+|---|---|---|---|
+| `069500` | KODEX 200 | `LONG_1X` | +1× long |
+| `122630` | KODEX 레버리지 | `LONG_2X` | +2× long |
+| `114800` | KODEX 인버스 | `INVERSE_1X` | −1× short |
+| `252670` | KODEX 200선물인버스2X ("곱버스") | `INVERSE_2X` | −2× short |
+
+`stance_for(kind, direction, confidence, regime)` returns a `Stance(label, rationale,
+risk_note)` whose `label` is a `StanceLabel` (`OVERWEIGHT`/`NEUTRAL`/`UNDERWEIGHT`/`AVOID`):
+
+- An instrument **aligned** with the house direction (a long under a bullish view, an
+  inverse under a bearish view) tilts toward `OVERWEIGHT` as confidence rises; one that
+  **fights** the view tilts toward `UNDERWEIGHT`/`AVOID`. A `NEUTRAL` house view is neutral
+  on 1× products and trims 2× products (sideways decay).
+- **Leverage-decay risk.** Every 2× product (`LONG_2X`, `INVERSE_2X` "곱버스") carries the
+  Korean risk note *"레버리지·일일 리밸런싱에 따른 변동성 손실(데케이) 위험 — 장기 보유
+  부적합"*, and is pulled toward `NEUTRAL`/`AVOID` in high-volatility or `CRISIS` regimes
+  even when its direction agrees — daily-rebalancing leveraged ETFs bleed in choppy tape.
+
+So under a confident **bearish / RISK_OFF** house view the brief overweights `114800`
+(인버스) and, conditionally, `252670` (곱버스, with its decay caveat) while underweighting
+or avoiding the longs; under a confident **bullish** view the inverses are
+underweighted/avoided. See ARCHITECTURE §4e for the end-to-end flow and ADR-017 for the
+decision.

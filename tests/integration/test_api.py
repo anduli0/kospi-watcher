@@ -55,6 +55,47 @@ async def test_list_agents_returns_21(client: AsyncClient) -> None:
     assert all(a["enabled"] for a in data["agents"])
 
 
+async def test_agents_org_hierarchy(client: AsyncClient) -> None:
+    resp = await client.get("/api/v1/agents/org")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["agent_count"] == 21
+    assert len(data["desks"]) == 6
+    keys = {d["key"] for d in data["desks"]}
+    assert keys == {"DATA_INTEGRITY", "MACRO", "FLOW_TECH", "FUNDAMENTAL", "RISK", "CHIEF"}
+    assert data["tiers"] == ["VALIDATE", "ANALYZE", "SYNTHESIZE"]
+
+
+async def test_prediction_run_latest_and_brief(client: AsyncClient) -> None:
+    run = await client.post("/api/v1/prediction/run", json={"agent_name": "n/a", "universe": []})
+    assert run.status_code == 200
+    pred = run.json()
+    assert len(pred["desk_views"]) == 6
+    assert {s["symbol"] for s in pred["instrument_stances"]} == {
+        "069500",
+        "122630",
+        "114800",
+        "252670",
+    }
+    assert pred["generated_by"] == "mock"
+    assert abs(sum(s["probability"] for s in pred["scenarios"]) - 1.0) < 1e-6
+
+    latest = await client.get("/api/v1/prediction/latest")
+    assert latest.status_code == 200
+    assert latest.json()["prediction_id"] == pred["prediction_id"]
+
+    brief = await client.get("/api/v1/brief")
+    assert brief.status_code == 200
+    body = brief.json()
+    assert "곱버스" in body["brief"]
+    assert len(body["stances"]) == 4
+
+
+async def test_brief_404_before_any_run(client: AsyncClient) -> None:
+    assert (await client.get("/api/v1/brief")).status_code == 404
+    assert (await client.get("/api/v1/prediction/latest")).status_code == 404
+
+
 async def test_market_quotes(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/market/quotes?symbols=069500,USDKRW")
     assert resp.status_code == 200

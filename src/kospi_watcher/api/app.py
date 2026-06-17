@@ -14,6 +14,7 @@ from kospi_watcher.api.routes import (
     health,
     market,
     order_proposals,
+    prediction,
     risk,
     system,
     trading,
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
     for router in (
         system.router,
         agents.router,
+        prediction.router,
         market.router,
         order_proposals.router,
         risk.router,

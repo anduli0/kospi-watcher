@@ -6,7 +6,27 @@ before changing code. It encodes safety invariants that **must not** be relaxed.
 ## What this is
 
 KOSPI-WATCHER is a Korean-equity (KOSPI) market-analysis and **risk-controlled**
-trading-research platform. It has two halves with a hard wall between them:
+trading-research platform. Its product now **centers on market prediction + a
+single-narrative daily brief** (like the sibling Fed-Watcher / KRW-Watcher
+systems); the trading path is **secondary and paper-only**. The 21 analysis
+agents are organised as a **hierarchical research-desk org** — 5 desks
+(`DATA_INTEGRITY`, `MACRO`, `FLOW_TECH`, `FUNDAMENTAL`, `RISK`) plus a `CHIEF`
+synthesizer, across 3 tiers (`VALIDATE → ANALYZE → SYNTHESIZE`),
+`domain/agents/org.py`, ADR-016. A **deterministic** synthesizer
+(`domain/prediction/synthesizer.py`, ADR-017) aggregates one full agent sweep
+(`AgentService.run_all`) into a `MarketPrediction`: market regime (one of 9),
+direction/confidence, **long / inverse / leveraged-inverse (곱버스) instrument
+stances** over `069500`/`122630`/`114800`/`252670`, three scenarios, and a Korean
+brief — **identical over mock-or-LLM findings** (it is deterministic over the
+findings; `generated_by` records only whether they came from `"mock"` or
+`"llm"`). New endpoints: `POST /api/v1/prediction/run`,
+`GET /api/v1/prediction/latest`, `GET /api/v1/brief`, `GET /api/v1/agents/org`;
+predictions persist in `market_predictions` and a worker `refresh_prediction` job
+(every 30 min) keeps the latest brief current. Predictions/stances are
+**display-only** — they are NOT order authority (the inverse/곱버스 ETFs are
+`tradable=false`, and any order still passes the deny-by-default Risk Engine).
+
+It has two halves with a hard wall between them:
 
 1. **Analysis** — 21 agents that *only* analyze. They emit `AgentFinding`s and
    have **no order-execution surface** (`AnalysisAgent` protocol in
@@ -68,21 +88,23 @@ real ones, stop — that violates the design.
 
 ```
 src/kospi_watcher/        # the package (src-layout, ADR-011)
-  domain/                 # pure, no I/O: enums, time, money, agents, risk, execution
+  domain/                 # pure, no I/O: enums, time, money, agents, prediction, risk, execution
                           #   agents/llm_agent.py = real Anthropic agent (ADR-015)
+                          #   agents/org.py = research-desk org chart (ADR-016)
+                          #   prediction/ = synthesizer + regime + long/inverse ladder (ADR-017)
                           #   execution/{paper,position}.py = PAPER fills + PnL (ADR-014)
   infrastructure/         # db engine/session, redis client (fakeredis fallback)
                           #   marketdata/ = keyless Yahoo + mock provider (ADR-013)
-  db/                     # ORM models (9 tables), repositories, custom types, seed
+  db/                     # ORM models (10 tables), repositories, custom types, seed
   api/                    # FastAPI app, routes, request/response schemas
-  agent_service/          # isolated analysis service (mock + llm runtimes)
+  agent_service/          # isolated analysis service (mock + llm) + PredictionService
   execution_gateway/      # isolated execution boundary (app + gateway)
   trading/                # TradingService — the PAPER execution orchestrator
-  worker/                 # APScheduler jobs
+  worker/                 # APScheduler jobs (heartbeat, mock_agent_sweep, refresh_prediction)
 apps/                     # per-service entry points (api, agent-service,
                           # execution-gateway, worker) + web (Next.js)
-alembic/                  # two migrations (0001 initial, 0002 paper trading),
-                          #   SQLite + Postgres compatible
+alembic/                  # three migrations (0001 initial, 0002 paper trading,
+                          #   0003 market_predictions), SQLite + Postgres compatible
 config/                   # risk_limits.yml, instruments.yml (+ agents/strategies)
 docs/                     # ARCHITECTURE, DATA_DICTIONARY, AGENT_DESIGN, PRODUCT_SPEC,
                           # TRADING_SAFETY, THREAT_MODEL, RUNBOOK, ULTRAPLAN, adr/
@@ -123,6 +145,13 @@ in-memory fakeredis (reported honestly at `/health`). Copy `.env.example` →
 ### Enabling the new capabilities
 
 ```powershell
+# Prediction + daily brief (the primary product surface) — no opt-in needed:
+# POST /api/v1/prediction/run  → run all agents, synthesize, persist, return MarketPrediction.
+# GET  /api/v1/prediction/latest  → latest stored prediction (404 until first run).
+# GET  /api/v1/brief              → latest daily brief (headline + narrative + long/inverse/곱버스 stances).
+# GET  /api/v1/agents/org         → the 5-desk + Chief research hierarchy (read-only).
+# The worker's refresh_prediction job (every 30 min) keeps latest/brief current.
+
 # Live market data is ON by default (keyless Yahoo). Force offline mock if needed:
 $env:MARKET_DATA_PROVIDER = "mock"
 # GET /api/v1/market/quotes  → live (or mock) quotes for KOSPI/USDKRW/ETFs.
@@ -172,10 +201,15 @@ until run on a host with Docker.
 ## Where to read more
 
 - `docs/ARCHITECTURE.md` — components, layering, data flow (incl. market data §4a,
-  paper execution §4b, agent runtimes §4c).
+  paper execution §4b, agent runtimes §4c, the research-desk org §4d, and the
+  prediction / daily-brief engine §4e).
 - `docs/DATA_DICTIONARY.md` — every table, enum, schema field, and key settings.
-- `docs/AGENT_DESIGN.md` — the 21 agents, the finding contract, and the runtimes.
+- `docs/AGENT_DESIGN.md` — the 21 agents, the finding contract, the runtimes, and
+  the desk org + prediction synthesis (§7).
+- `docs/PRODUCT_SPEC.md` — product goals; §12 covers the prediction engine +
+  daily brief + the long/short (인버스/곱버스) ladder.
 - `docs/TRADING_SAFETY.md` — the risk checks, kill-switch model, and the
   PAPER-implemented / LIVE-not-implemented boundary (§12).
-- `docs/adr/` — the 15 architecture decision records (ADR-013/014/015 cover the
-  new market-data, paper-execution, and LLM-runtime decisions).
+- `docs/adr/` — the 17 architecture decision records (ADR-013/014/015 cover the
+  market-data, paper-execution, and LLM-runtime decisions; ADR-016/017 cover the
+  research-desk org and the deterministic prediction / daily-brief engine).

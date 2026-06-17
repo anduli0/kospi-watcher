@@ -3,10 +3,22 @@
 Status: Phase 1. Verified against the source tree under
 `src/kospi_watcher/`, `apps/`, `alembic/`, `pyproject.toml`, and `docker-compose.yml`.
 
-Three capabilities are now live and described below: **real market data**
+Five capabilities are now live and described below: **real market data**
 (keyless Yahoo Finance with a mock fallback, §4a), a **PAPER (simulated)
-execution path** (the safe execution tier, §4b), and **real LLM agents**
-(Anthropic-backed, with a deterministic mock fallback, §4c).
+execution path** (the safe execution tier, §4b), **real LLM agents**
+(Anthropic-backed, with a deterministic mock fallback, §4c), a **research-desk
+hierarchy** that organises the 21 agents into 5 desks + a Chief across 3 tiers
+(§4d), and a **market-prediction / daily-brief engine** that synthesises every
+agent run into a single house view — regime, direction/confidence, long /
+inverse / 곱버스 (leveraged-inverse) instrument stances, scenarios, and a Korean
+narrative brief (§4e).
+
+> **Product focus.** The product now centers on **prediction + a daily brief**
+> (in line with the sibling Fed-Watcher / KRW-Watcher systems); the trading path
+> is **secondary and paper-only** (PAPER simulated execution; live remains
+> unimplemented). The prediction is a **deterministic synthesis** over the agent
+> findings, so it is identical whether those findings came from the mock or the
+> real-LLM runtime.
 
 > Safety note carried through this document: **PAPER (simulated) execution is
 > implemented and safe** — it moves no real money and contacts no real broker,
@@ -60,14 +72,15 @@ thin entrypoints under `apps/<svc>/main.py` that import the shared package
 | `api` | `src/kospi_watcher/api/app.py` (`create_app`) via `apps/api/main.py` | 8000 | Main FastAPI app. Health, system status, agent list / mock-run / LLM run, live market quotes, order-proposal validation, risk evaluation, **paper trading** (orders / positions / account), audit-log listing. Owns persistence + seeding on startup. |
 | `agent-service` | `src/kospi_watcher/agent_service/app.py` via `apps/agent-service/main.py` | 8001 | Isolated ASGI app. **Analysis only**, no order-execution surface. Exposes `/health`, `/agents`, `/run`. |
 | `execution-gateway` | `src/kospi_watcher/execution_gateway/app.py` via `apps/execution-gateway/main.py` | 8002 | Isolated ASGI app. **No public submit endpoint** in this phase — exposes only `/health`. The submit path is in-process; `ExecutionGateway` allows the simulated `MOCK` and `PAPER` brokers and blocks any live broker. |
-| `worker` | `src/kospi_watcher/worker/scheduler.py` via `apps/worker/main.py` | — | APScheduler process: a `heartbeat` job (every 60s) and a `mock_agent_sweep` job (every 15 min). Never creates orders. |
+| `worker` | `src/kospi_watcher/worker/scheduler.py` via `apps/worker/main.py` | — | APScheduler process: a `heartbeat` job (every 60s), a `mock_agent_sweep` job (every 15 min), and a `refresh_prediction` job (every 30 min) that runs all agents, synthesizes a fresh house prediction / daily brief, and persists it (§4e). Never creates orders. |
 | `web` | `apps/web/` (Next.js App Router) | 3000 | Next.js 15 / React 19 front end. Reads `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8000`). |
 
-The `api` service mounts eight routers (`src/kospi_watcher/api/app.py`):
-`health` is mounted at the root; the other seven (`system`, `agents`, `market`,
-`order_proposals`, `risk`, `trading`, `audit_logs`) are mounted under `/api/v1`.
+The `api` service mounts nine routers (`src/kospi_watcher/api/app.py`):
+`health` is mounted at the root; the other eight (`system`, `agents`,
+`prediction`, `market`, `order_proposals`, `risk`, `trading`, `audit_logs`) are
+mounted under `/api/v1`.
 
-### The 14 `api` endpoints
+### The 18 `api` endpoints
 
 | Method | Path | Route module |
 |---|---|---|
@@ -76,6 +89,10 @@ The `api` service mounts eight routers (`src/kospi_watcher/api/app.py`):
 | GET | `/api/v1/agents` | `api/routes/agents.py` |
 | POST | `/api/v1/agents/mock-run` | `api/routes/agents.py` |
 | POST | `/api/v1/agents/run` | `api/routes/agents.py` |
+| POST | `/api/v1/prediction/run` | `api/routes/prediction.py` |
+| GET | `/api/v1/prediction/latest` | `api/routes/prediction.py` |
+| GET | `/api/v1/brief` | `api/routes/prediction.py` |
+| GET | `/api/v1/agents/org` | `api/routes/prediction.py` |
 | GET | `/api/v1/market/quotes` | `api/routes/market.py` |
 | POST | `/api/v1/order-proposals/validate` | `api/routes/order_proposals.py` |
 | POST | `/api/v1/risk/evaluate` | `api/routes/risk.py` |
@@ -87,8 +104,10 @@ The `api` service mounts eight routers (`src/kospi_watcher/api/app.py`):
 | GET | `/api/v1/audit-logs` | `api/routes/audit_logs.py` |
 
 `POST /api/v1/agents/run` runs the configured agent runtime (real LLM when armed,
-else the mock); `GET /api/v1/market/quotes` returns live (or mock) quotes; the
-five `trading.py` endpoints drive the PAPER execution path (§4b).
+else the mock); the four `prediction.py` endpoints expose the product's primary
+surface — run/fetch the house prediction, the daily brief, and the desk org
+chart (§4d, §4e); `GET /api/v1/market/quotes` returns live (or mock) quotes; the
+five `trading.py` endpoints drive the secondary PAPER execution path (§4b).
 
 CORS allows only `GET`/`POST`, origins from `cors_allow_origins`
 (default `http://localhost:3000`), and credentials are disabled.
@@ -99,7 +118,7 @@ CORS allows only `GET`/`POST`, origins from `cors_allow_origins`
                         ┌──────────────────────────────────────────────────────┐
                         │                      api  (:8000)                     │
                         │                kospi_watcher.api.app                  │
-   web (:3000) ──HTTP──▶│  routers: health, system, agents, market,            │
+   web (:3000) ──HTTP──▶│  routers: health, system, agents, prediction, market,│
    Next.js              │           order-proposals, risk, trading, audit-logs │
                         │                       │                              │
                         │        ┌──────────────┼───────────────┐              │
@@ -150,7 +169,8 @@ src/kospi_watcher/
 │   ├── enums.py              # StrEnum domain enumerations
 │   ├── time.py               # tz-aware UTC helpers (ADR-009)
 │   ├── money.py              # Decimal-only money (ADR-008)
-│   ├── agents/               # base, catalog (21 specs), registry, schemas, llm_agent
+│   ├── agents/               # base, catalog (21 specs), org (5 desks + Chief), registry, schemas, llm_agent
+│   ├── prediction/           # instruments (long/inverse ladder), regime, schemas, synthesizer
 │   ├── risk/                 # engine, limits, schemas
 │   └── execution/            # broker, order_state, paper, position
 ├── infrastructure/           # db engine/session, redis client, market data
@@ -158,7 +178,7 @@ src/kospi_watcher/
 │   ├── redis_client.py
 │   └── marketdata/           # base (Quote/Protocol), yahoo, mock, factory
 ├── db/                       # ORM models, repositories, alembic-backed schema
-│   ├── models.py             # 9 tables
+│   ├── models.py             # 10 tables
 │   ├── types.py              # DecimalString TypeDecorator
 │   ├── repositories.py
 │   └── seed.py
@@ -374,6 +394,114 @@ for the runtime contract and the standing "no order authority" invariant.
 
 ---
 
+## 4d. Research desk hierarchy (org chart)
+
+The 21 analysis agents are organised as a research firm rather than a flat list
+(`domain/agents/org.py`, ADR-016). Five **desks** — each with a designated
+*lead* — feed a single **Chief** synthesizer, and work runs in **tiers**:
+`VALIDATE → ANALYZE → SYNTHESIZE` (`Tier`). Data integrity validates first, the
+four directional desks run in parallel, then the Chief synthesizes. Each desk
+carries a directional **weight** the Chief uses when combining desk views into
+the house prediction (the analysis desks' weights sum to ~1.0; the Chief is the
+composer at weight 0).
+
+| Desk (`Desk`) | Title (KO) | Tier | Weight | Lead | Members |
+|---|---|---|---|---|---|
+| `DATA_INTEGRITY` | 데이터·검증 데스크 | `VALIDATE` | 0.10 | Market Data Integrity Agent | 3 |
+| `MACRO` | 거시·국제 데스크 | `ANALYZE` | 0.24 | Korea Macro Agent | 6 |
+| `FLOW_TECH` | 수급·기술 데스크 | `ANALYZE` | 0.26 | Foreign and Institutional Flow Agent | 4 |
+| `FUNDAMENTAL` | 실적·섹터 데스크 | `ANALYZE` | 0.24 | Earnings and Valuation Agent | 5 |
+| `RISK` | 리스크·레드팀 데스크 | `ANALYZE` | 0.16 | Red-Team and Risk Agent | 2 |
+| `CHIEF` | 수석 신디사이저 | `SYNTHESIZE` | 0.00 | Chief Market Synthesizer | 1 |
+
+The roster is pure metadata over `catalog.py`: module-level assertions guarantee
+every desk member matches a catalog agent name exactly and that the desks cover
+**all 21 agents** (`3 + 6 + 4 + 5 + 2 + 1`). `org.py` runs nothing — the
+orchestration lives in the prediction synthesizer (§4e). `GET /api/v1/agents/org`
+exposes the chart read-only (`OrgResponse`: per-desk key/title/tier/weight/lead/
+members, the three tier names, and the agent count). See AGENT_DESIGN.md §7.
+
+---
+
+## 4e. Prediction & daily brief
+
+The product's primary output is a **house market prediction with a single-narrative
+daily brief**. `PredictionService.generate` (`agent_service/prediction.py`) runs
+**all** agents concurrently via the new `AgentService.run_all` (each agent still
+falls back to mock on its own failure), flattens their findings, and hands them
+to the **pure, deterministic** synthesizer (`domain/prediction/synthesizer.py`,
+ADR-017):
+
+```
+all agents (run_all, concurrent) ──▶ findings
+        │
+        ▼
+per-desk vote: Σ(impact × confidence × sign), lead-weighted (×1.5)  ──▶ DeskView per desk
+        │
+        ▼
+Chief synthesis: overall_score = Σ(desk.weight × desk.score)
+        │
+        ├─▶ direction (BULLISH/BEARISH/NEUTRAL) + confidence
+        ├─▶ regime  (classify_regime → one of 9 MarketRegime)
+        ├─▶ instrument stances  (069500/122630/114800/252670 → long / inverse / 곱버스)
+        ├─▶ 3 scenarios (probabilities sum to 1.0)
+        └─▶ headline + single-narrative Korean brief
+        │
+        ▼
+MarketPrediction  ──▶ persisted in market_predictions  ──▶ GET /prediction/latest, /brief
+```
+
+- **Desk views.** `_desk_view` scores each desk from its members' findings:
+  `impact` weight (LOW 1 / MEDIUM 2 / HIGH 3) × `confidence` × direction sign,
+  with the desk **lead** getting a ×1.5 bonus; the normalised signed score gives
+  the desk's `lean` and `conviction`, plus its top drivers.
+- **Chief synthesis.** The overall directional score is the **desk-weight-weighted**
+  sum of desk scores; `direction` comes from a threshold band and `confidence`
+  scales with `|score|` (capped 0.95).
+- **Regime.** `classify_regime` (`domain/prediction/regime.py`) maps
+  (direction, confidence, vol-high, risk-high, data-ok, top-desk) to one of the
+  **9 `MarketRegime`** classes (e.g. bearish + high risk + high confidence →
+  `CRISIS`; bullish + high confidence + calm → `RISK_ON_STRONG`; data not ok →
+  `DATA_UNCERTAIN`).
+- **Instrument stances (long / inverse / 곱버스).** Over the four-product ladder
+  `069500` (LONG_1X), `122630` (LONG_2X), `114800` (INVERSE_1X), `252670`
+  (INVERSE_2X "곱버스"), `stance_for` maps the house (direction, confidence,
+  regime) to a `StanceLabel` (`OVERWEIGHT`/`NEUTRAL`/`UNDERWEIGHT`/`AVOID`) per
+  instrument — so a **bearish** view yields an actionable *inverse / leveraged-
+  inverse overweight*, not merely "avoid long". Leveraged (2x) products carry a
+  Korean **leverage / daily-rebalancing volatility-decay** risk note and are
+  pulled toward `NEUTRAL`/`AVOID` in choppy or crisis regimes.
+- **Scenarios.** Three scenarios (base / reversal / sideways) whose
+  probabilities are sized off `confidence` and **renormalised to sum to 1.0**.
+- **Brief.** `_brief` composes one continuous Korean narrative (regime → house
+  lean & confidence → lead desk's driver → Risk desk's caveat & invalidation →
+  long/inverse/곱버스 positioning), not a bag of disjoint captions.
+
+`MarketPrediction` (`domain/prediction/schemas.py`, `PREDICTION_SCHEMA_VERSION =
+"1.0.0"`) carries `prediction_id`, `as_of`, `horizon` (default `D5`), `regime`,
+`direction`, `confidence`, `data_quality`, `headline`, `brief`, `desk_views`,
+`instrument_stances`, `scenarios`, `generated_by` (`"mock"|"llm"`), and
+`agent_count`. `generated_by` is the runtime that actually produced the findings,
+so the synthesis is honest about its inputs while remaining deterministic over
+them.
+
+**Endpoints** (`api/routes/prediction.py`, under `/api/v1`):
+
+- `POST /prediction/run` — run all agents, synthesize, **persist**
+  (`save_prediction`), audit-log (`AuditAction.AGENT_RUN`), return the
+  `MarketPrediction`.
+- `GET /prediction/latest` — the most recent stored prediction (404 until the
+  first run).
+- `GET /brief` — the latest daily brief as a `BriefResponse` (headline +
+  narrative + the instrument stances with risk notes).
+- `GET /agents/org` — the desk hierarchy (§4d).
+
+**Worker.** The `refresh_prediction` job (every 30 min, `worker/scheduler.py`)
+regenerates and persists a fresh prediction so `/prediction/latest` and `/brief`
+stay current without a manual `POST`.
+
+---
+
 ## 5. Persistence
 
 The same ORM and the same single Alembic migration run on both backends; the
@@ -397,9 +525,9 @@ ADR-012):
 - Alembic uses `render_as_batch=True` (`alembic/env.py`) so SQLite ALTERs work,
   and pulls the URL from `Settings`.
 
-The nine tables (`db/models.py`); migration `alembic/versions/0001_initial.py`
-creates the first six and `0002_paper_trading.py` adds `orders` / `fills` /
-`positions`:
+The ten tables (`db/models.py`); migration `alembic/versions/0001_initial.py`
+creates the first six, `0002_paper_trading.py` adds `orders` / `fills` /
+`positions`, and `0003_predictions.py` adds `market_predictions`:
 
 | Table | Model | Notes |
 |---|---|---|
@@ -411,6 +539,7 @@ creates the first six and `0002_paper_trading.py` adds `orders` / `fills` /
 | `orders` | `OrderRow` | a paper order + lifecycle (`status`); unique `idempotency_key`; FK target of `fills`; prices via `DecimalString` (migration `0002`). |
 | `fills` | `FillRow` | one simulated fill; FK → `orders.id`; `price` via `DecimalString` (migration `0002`). |
 | `positions` | `PositionRow` | **composite PK `(account, symbol)`**; signed `quantity`, `avg_cost`, `realized_pnl` via `DecimalString` (migration `0002`). |
+| `market_predictions` | `PredictionRow` | one stored house prediction + daily brief; scalar columns (`as_of`/`direction`/`confidence`/`regime`/`headline`/`brief`/`generated_by`/`agent_count`) index the latest view, the full `MarketPrediction` lives in `payload` (`JSON`); `created_at` indexed for "latest" (migration `0003`). |
 | `audit_logs` | `AuditLogRow` | **append-only** (ADR-006) — application code only inserts (`add_audit_log`); autoincrement integer id. |
 
 On `api` startup the lifespan runs `Base.metadata.create_all` (dev convenience;
