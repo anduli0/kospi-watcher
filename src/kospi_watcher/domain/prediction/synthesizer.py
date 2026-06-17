@@ -30,12 +30,25 @@ from kospi_watcher.domain.enums import (
 from kospi_watcher.domain.prediction.instruments import PREDICTION_UNIVERSE, stance_for
 from kospi_watcher.domain.prediction.regime import REGIME_KO, classify_regime
 from kospi_watcher.domain.prediction.schemas import (
+    AgentPosition,
+    ChiefDeliberation,
+    Deliberation,
+    DeskDeliberation,
     DeskView,
     InstrumentStance,
     MarketPrediction,
     Scenario,
 )
 from kospi_watcher.domain.time import now_utc
+
+_SUBJECT = "코스피200 지수 방향 (KODEX 200 추종 기준)"
+_HORIZON_LABEL: dict[Horizon, str] = {
+    Horizon.INTRADAY: "장중 (인트라데이)",
+    Horizon.D1: "초단기 (1거래일, D1)",
+    Horizon.D5: "단기 (약 1주, D5)",
+    Horizon.D20: "중기 (약 1개월, D20)",
+    Horizon.STRUCTURAL: "구조적 (장기)",
+}
 
 _IMPACT_W: dict[Impact, float] = {Impact.LOW: 1.0, Impact.MEDIUM: 2.0, Impact.HIGH: 3.0}
 _DIR_SIGN: dict[MarketDirection, int] = {
@@ -145,6 +158,78 @@ def _scenarios(direction: MarketDirection, confidence: float) -> list[Scenario]:
     ]
 
 
+def _opposes(a: MarketDirection, b: MarketDirection) -> bool:
+    return {a, b} == {MarketDirection.BULLISH, MarketDirection.BEARISH}
+
+
+def _short(name: str) -> str:
+    return name.replace(" Agent", "")
+
+
+def _desk_deliberation(
+    desk: DeskSpec, by_agent: dict[str, AgentFinding], view: DeskView
+) -> DeskDeliberation:
+    positions: list[AgentPosition] = []
+    for name in desk.members:
+        finding = by_agent.get(name)
+        if finding is None:
+            continue
+        positions.append(
+            AgentPosition(
+                agent=name,
+                is_lead=name == desk.lead,
+                direction=finding.direction,
+                confidence=round(finding.confidence, 2),
+                note=_trim(finding.thesis, 70),
+            )
+        )
+    consensus = view.lean
+    aligned = [p for p in positions if p.direction == consensus]
+    agreement = round(len(aligned) / len(positions), 2) if positions else 0.0
+    dissent = [p.agent for p in positions if _opposes(p.direction, consensus)]
+    dnote = (
+        f", 이견 {len(dissent)}건({', '.join(_short(d) for d in dissent)})은 리드가 가중·조율"
+        if dissent
+        else ", 이견 없음"
+    )
+    lead_note = (
+        f"{desk.lead}(리드): {len(aligned)}/{len(positions)}건 "
+        f"{_DIR_KO[consensus]} 합의{dnote}."
+    )
+    return DeskDeliberation(
+        desk=desk.key.value,
+        title=desk.title_ko,
+        consensus=consensus,
+        agreement=agreement,
+        positions=positions,
+        dissent=dissent,
+        lead_note=lead_note,
+    )
+
+
+def _chief_deliberation(
+    directional_views: list[DeskView], direction: MarketDirection, confidence: float
+) -> ChiefDeliberation:
+    aligned = [
+        v.title
+        for v in directional_views
+        if v.lean == direction and direction is not MarketDirection.NEUTRAL
+    ]
+    conflicted = [v.title for v in directional_views if _opposes(v.lean, direction)]
+    aligned_w = sum(v.weight for v in directional_views if v.lean == direction)
+    if direction is MarketDirection.NEUTRAL:
+        note = f"수석 신디사이저: 데스크 간 방향이 엇갈려 중립으로 종합(확신 {confidence:.0%})."
+    else:
+        note = (
+            f"수석 신디사이저: {len(aligned)}개 데스크가 {_DIR_KO[direction]}를 지지"
+            f"(가중 {aligned_w:.0%}), {len(conflicted)}개 데스크는 이견. "
+            f"데스크 가중 종합 결과 {_DIR_KO[direction]}로 확정(확신 {confidence:.0%})."
+        )
+    return ChiefDeliberation(
+        overall=direction, aligned_desks=aligned, conflicted_desks=conflicted, note=note
+    )
+
+
 def synthesize(
     findings: Sequence[AgentFinding],
     *,
@@ -152,6 +237,7 @@ def synthesize(
     horizon: Horizon = Horizon.D5,
     generated_by: str = "mock",
     agent_count: int = 21,
+    news_headlines: Sequence[str] | None = None,
 ) -> MarketPrediction:
     as_of = as_of or now_utc()
     by_agent: dict[str, AgentFinding] = {}
@@ -200,15 +286,24 @@ def synthesize(
         for inst in PREDICTION_UNIVERSE
     ]
     scenarios = _scenarios(direction, confidence)
+    news_refs = [h for h in (news_headlines or []) if h][:5]
     headline = _headline(direction, confidence, regime)
-    brief = _brief(
-        direction, confidence, regime, view_by_desk, top_desk, stances
+    brief = _brief(direction, confidence, regime, view_by_desk, top_desk, stances, news_refs)
+
+    analysis_desks = [d for d in AGENT_ORG if d.key is not Desk.CHIEF]
+    deliberation = Deliberation(
+        desks=[_desk_deliberation(d, by_agent, view_by_desk[d.key]) for d in analysis_desks],
+        chief=_chief_deliberation(
+            [view_by_desk[d.key] for d in DIRECTIONAL_DESKS], direction, confidence
+        ),
     )
 
     return MarketPrediction(
         prediction_id=uuid.uuid4().hex,
         as_of=as_of,
+        subject=_SUBJECT,
         horizon=horizon,
+        horizon_label=_HORIZON_LABEL[horizon],
         regime=regime,
         direction=direction,
         confidence=confidence,
@@ -216,8 +311,10 @@ def synthesize(
         headline=headline,
         brief=brief,
         desk_views=desk_views,
+        deliberation=deliberation,
         instrument_stances=stances,
         scenarios=scenarios,
+        news_refs=news_refs,
         generated_by=generated_by,
         agent_count=agent_count,
         created_at=now_utc(),
@@ -249,6 +346,7 @@ def _brief(
     view_by_desk: dict[Desk, DeskView],
     top_desk: Desk,
     stances: list[InstrumentStance],
+    news_refs: list[str],
 ) -> str:
     dir_ko = _DIR_KO[direction]
     lead = view_by_desk[top_desk]
@@ -266,9 +364,16 @@ def _brief(
         MarketDirection.NEUTRAL: "방향 확정 전까지 레버리지 상품은 회피",
     }[direction]
 
+    news_clause = (
+        f" 최근 '{_trim(news_refs[0], 50)}' 등 뉴스 흐름도 함께 반영했다."
+        if news_refs
+        else ""
+    )
+
     return (
-        f"오늘 코스피는 {REGIME_KO[regime]} 국면으로 판단된다. 21개 분석 에이전트를 5개 데스크로 "
-        f"계층 종합한 하우스 뷰는 {dir_ko}이며 확신도는 {confidence:.0%}다. "
+        f"[예측 대상: {_SUBJECT}] 오늘 코스피는 {REGIME_KO[regime]} 국면으로 판단된다. "
+        f"21개 분석 에이전트를 5개 데스크로 계층 종합(데스크 토의→수석 조율)한 하우스 뷰는 "
+        f"{dir_ko}이며 확신도는 {confidence:.0%}다.{news_clause} "
         f"{lead.title}가 {_DIR_KO[lead.lean]} 신호를 주도했고({lead_driver}), "
         f"이는 종합 방향성의 핵심 근거가 됐다. 다만 {risk.title}는 {_DIR_KO[risk.lean]} 시각에서 "
         f"{risk_driver}을(를) 경고하며, {invalidation}한다. "

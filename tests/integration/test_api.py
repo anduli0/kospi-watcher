@@ -96,6 +96,22 @@ async def test_brief_404_before_any_run(client: AsyncClient) -> None:
     assert (await client.get("/api/v1/prediction/latest")).status_code == 404
 
 
+async def test_news_scrape_list_and_dates(client: AsyncClient) -> None:
+    scrape = await client.post("/api/v1/news/scrape")
+    assert scrape.status_code == 200
+    assert scrape.json()["added"] >= 1  # mock provider yields items
+
+    listing = await client.get("/api/v1/news?limit=10")
+    assert listing.status_code == 200
+    body = listing.json()
+    assert body["count"] >= 1
+    assert all("title" in it and "date_kst" in it for it in body["items"])
+
+    dates = await client.get("/api/v1/news/dates")
+    assert dates.status_code == 200
+    assert len(dates.json()["dates"]) >= 1
+
+
 async def test_market_quotes(client: AsyncClient) -> None:
     resp = await client.get("/api/v1/market/quotes?symbols=069500,USDKRW")
     assert resp.status_code == 200

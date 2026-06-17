@@ -46,7 +46,7 @@ export default function RiskPage() {
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
       <PageHeader
-        title="Risk Engine"
+        title="리스크 엔진"
         subtitle="결정론적 deny-by-default 리스크 평가 — 주문은 실행되지 않습니다"
       />
       <div className="mt-6">
@@ -55,7 +55,7 @@ export default function RiskPage() {
 
       <section className="mt-8 grid gap-6 lg:grid-cols-[320px_1fr]">
         <div className="card space-y-4">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">주문 제안 (모의)</h2>
+          <h2 className="section-label">주문 제안 (모의)</h2>
           <label className="block text-sm">
             <span className="text-muted">종목</span>
             <select
@@ -100,14 +100,14 @@ export default function RiskPage() {
           <button
             onClick={evaluate}
             disabled={busy}
-            className="w-full rounded-md border border-accent/40 bg-accent/10 px-3 py-2 font-mono text-sm text-accent transition-colors hover:bg-accent/20 disabled:opacity-40"
+            className="w-full rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-sm font-semibold text-accent transition-colors hover:bg-accent/20 disabled:opacity-40"
           >
             {busy ? "평가 중…" : "리스크 평가"}
           </button>
         </div>
 
         <div className="card">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">결정</h2>
+          <h2 className="section-label">결정</h2>
           {error ? (
             <p className="mt-3 font-mono text-xs text-danger break-all">{error}</p>
           ) : decision ? (

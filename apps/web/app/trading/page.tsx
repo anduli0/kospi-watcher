@@ -65,7 +65,7 @@ export default function TradingPage() {
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
       <PageHeader
-        title="Paper Trading"
+        title="페이퍼 트레이딩"
         subtitle="모의 체결 — 실거래·실계좌 아님. RESEARCH 모드에서는 실행이 비활성화됩니다."
       />
       <div className="mt-6">
@@ -74,7 +74,7 @@ export default function TradingPage() {
 
       <section className="mt-8 grid gap-6 lg:grid-cols-[320px_1fr]">
         <div className="card space-y-4">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">주문 (paper)</h2>
+          <h2 className="section-label">주문 (paper)</h2>
           <label className="block text-sm">
             <span className="text-muted">종목</span>
             <select
@@ -110,7 +110,7 @@ export default function TradingPage() {
           <button
             onClick={submit}
             disabled={busy}
-            className="w-full rounded-md border border-accent/40 bg-accent/10 px-3 py-2 font-mono text-sm text-accent transition-colors hover:bg-accent/20 disabled:opacity-40"
+            className="w-full rounded-xl border border-accent/40 bg-accent/10 px-3 py-2 text-sm font-semibold text-accent transition-colors hover:bg-accent/20 disabled:opacity-40"
           >
             {busy ? "제출 중…" : "매수 주문 (BUY)"}
           </button>
@@ -139,7 +139,7 @@ export default function TradingPage() {
 
         <div className="space-y-6">
           <div className="card">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">계좌 (paper)</h2>
+            <h2 className="section-label">계좌 (paper)</h2>
             {account.loading ? (
               <Loading />
             ) : account.error ? (

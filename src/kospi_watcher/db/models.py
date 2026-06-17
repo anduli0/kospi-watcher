@@ -182,6 +182,23 @@ class PredictionRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 
 
+class NewsItemRow(Base):
+    """A scraped news headline. ``date_kst`` groups items by Korean calendar day;
+    items past the retention window are pruned (ADR-018)."""
+
+    __tablename__ = "news_items"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    title: Mapped[str] = mapped_column(Text)
+    url: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(128))
+    topic: Mapped[str] = mapped_column(String(64), index=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    date_kst: Mapped[str] = mapped_column(String(10), index=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class AuditLogRow(Base):
     """Append-only audit log. No update/delete path exists in application code
     (ADR-006). New rows only."""

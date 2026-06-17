@@ -31,7 +31,10 @@ _service = PredictionService()
 
 @router.post("/prediction/run", response_model=MarketPrediction)
 async def run_prediction(req: MockRunRequest, session: SessionDep) -> MarketPrediction:
-    prediction = await _service.generate(tuple(req.universe) or ("069500", "114800"))
+    headlines = await repositories.recent_headlines(session, limit=8)
+    prediction = await _service.generate(
+        tuple(req.universe) or ("069500", "114800"), news_headlines=headlines
+    )
     await save_prediction(session, prediction)
     await add_audit_log(
         session,
@@ -64,6 +67,8 @@ async def daily_brief(session: SessionDep) -> BriefResponse:
     pred = MarketPrediction.model_validate(row.payload)
     return BriefResponse(
         as_of=pred.as_of,
+        subject=pred.subject,
+        horizon_label=pred.horizon_label,
         generated_by=pred.generated_by,
         agent_count=pred.agent_count,
         direction=pred.direction.value,
@@ -71,6 +76,7 @@ async def daily_brief(session: SessionDep) -> BriefResponse:
         regime=pred.regime.value,
         headline=pred.headline,
         brief=pred.brief,
+        news_refs=pred.news_refs,
         stances=[
             BriefStance(
                 symbol=s.symbol,

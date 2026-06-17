@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kospi_watcher.db import models
@@ -18,7 +19,8 @@ from kospi_watcher.domain.agents.schemas import AgentRun
 from kospi_watcher.domain.enums import AuditAction
 from kospi_watcher.domain.prediction.schemas import MarketPrediction
 from kospi_watcher.domain.risk.schemas import OrderProposal, RiskDecision
-from kospi_watcher.domain.time import now_utc
+from kospi_watcher.domain.time import now_utc, to_kst
+from kospi_watcher.infrastructure.news.base import NewsItem
 
 
 async def add_audit_log(
@@ -234,3 +236,82 @@ async def get_latest_prediction(
         .limit(1)
     )
     return (await session.execute(stmt)).scalars().first()
+
+
+# --- News ---
+
+
+async def upsert_news(session: AsyncSession, items: Sequence[NewsItem]) -> int:
+    """Insert any items whose id is not already stored. Returns the count added."""
+    if not items:
+        return 0
+    ids = [i.id for i in items]
+    existing = set(
+        (
+            await session.execute(
+                select(models.NewsItemRow.id).where(models.NewsItemRow.id.in_(ids))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    added = 0
+    for it in items:
+        if it.id in existing:
+            continue
+        session.add(
+            models.NewsItemRow(
+                id=it.id,
+                title=it.title,
+                url=it.url,
+                source=it.source,
+                topic=it.topic,
+                published_at=it.published_at,
+                date_kst=to_kst(it.published_at).date().isoformat(),
+                summary=it.summary,
+                created_at=now_utc(),
+            )
+        )
+        existing.add(it.id)
+        added += 1
+    await session.flush()
+    return added
+
+
+async def prune_news(session: AsyncSession, *, older_than: datetime) -> int:
+    """Delete news older than ``older_than`` (retention). Returns rows removed."""
+    stmt = (
+        delete(models.NewsItemRow)
+        .where(models.NewsItemRow.published_at < older_than)
+        .execution_options(synchronize_session=False)
+    )
+    result = await session.execute(stmt)
+    return int(getattr(result, "rowcount", 0) or 0)
+
+
+async def list_news(
+    session: AsyncSession, *, date_kst: str | None = None, limit: int = 50
+) -> Sequence[models.NewsItemRow]:
+    stmt = select(models.NewsItemRow)
+    if date_kst is not None:
+        stmt = stmt.where(models.NewsItemRow.date_kst == date_kst)
+    stmt = stmt.order_by(desc(models.NewsItemRow.published_at)).limit(limit)
+    return (await session.execute(stmt)).scalars().all()
+
+
+async def news_dates(session: AsyncSession) -> list[tuple[str, int]]:
+    stmt = (
+        select(models.NewsItemRow.date_kst, func.count())
+        .group_by(models.NewsItemRow.date_kst)
+        .order_by(desc(models.NewsItemRow.date_kst))
+    )
+    return [(row[0], row[1]) for row in (await session.execute(stmt)).all()]
+
+
+async def recent_headlines(session: AsyncSession, *, limit: int = 8) -> list[str]:
+    stmt = (
+        select(models.NewsItemRow.title)
+        .order_by(desc(models.NewsItemRow.published_at))
+        .limit(limit)
+    )
+    return list((await session.execute(stmt)).scalars().all())

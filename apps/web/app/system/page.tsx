@@ -10,11 +10,11 @@ export default function SystemPage() {
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
-      <PageHeader title="System" subtitle="버전 · 시각 · 기능 플래그 · 데이터 소스 · 감사 로그" />
+      <PageHeader title="시스템" subtitle="버전 · 시각 · 기능 플래그 · 데이터 소스 · 감사 로그" />
 
       <section className="mt-8 grid gap-4 lg:grid-cols-2">
         <div className="card">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">Status</h2>
+          <h2 className="section-label">Status</h2>
           {status.loading ? (
             <Loading />
           ) : status.error ? (
@@ -38,7 +38,7 @@ export default function SystemPage() {
         </div>
 
         <div className="card">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">Health & flags</h2>
+          <h2 className="section-label">Health & flags</h2>
           {health.data ? (
             <div className="mt-3 space-y-3 text-sm">
               <div className="flex items-center gap-2">
@@ -71,7 +71,7 @@ export default function SystemPage() {
       </section>
 
       <section className="mt-6">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">데이터 소스 (Phase 1: 미연결)</h2>
+        <h2 className="section-label">데이터 소스 (Phase 1: 미연결)</h2>
         <div className="mt-3 flex flex-wrap gap-2">
           {status.data?.data_sources.map((d) => (
             <span
@@ -85,7 +85,7 @@ export default function SystemPage() {
       </section>
 
       <section className="mt-8">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">감사 로그 (append-only)</h2>
+        <h2 className="section-label">감사 로그 (append-only)</h2>
         <div className="mt-3 card p-0">
           {audit.loading ? (
             <div className="p-5">

@@ -3,15 +3,20 @@
 Status: Phase 1. Verified against the source tree under
 `src/kospi_watcher/`, `apps/`, `alembic/`, `pyproject.toml`, and `docker-compose.yml`.
 
-Five capabilities are now live and described below: **real market data**
+Seven capabilities are now live and described below: **real market data**
 (keyless Yahoo Finance with a mock fallback, §4a), a **PAPER (simulated)
 execution path** (the safe execution tier, §4b), **real LLM agents**
 (Anthropic-backed, with a deterministic mock fallback, §4c), a **research-desk
 hierarchy** that organises the 21 agents into 5 desks + a Chief across 3 tiers
-(§4d), and a **market-prediction / daily-brief engine** that synthesises every
+(§4d), a **market-prediction / daily-brief engine** that synthesises every
 agent run into a single house view — regime, direction/confidence, long /
 inverse / 곱버스 (leveraged-inverse) instrument stances, scenarios, and a Korean
-narrative brief (§4e).
+narrative brief (§4e), a **news scraping & retention layer** (keyless Google News
+RSS, a dated `news_items` store pruned to a retention window, feeding the brief,
+§4f), and a **visible agent deliberation** (desk positions → lead reconciliation →
+chief synthesis embedded in every prediction, §4g). The front end is now a
+**multi-page modern UI** (Pretendard, dark fintech palette) with an 오늘 / 예측 /
+뉴스 / 에이전트 / 트레이딩 / 시스템 nav and a disclaimer + ownership footer (§6a).
 
 > **Product focus.** The product now centers on **prediction + a daily brief**
 > (in line with the sibling Fed-Watcher / KRW-Watcher systems); the trading path
@@ -72,15 +77,15 @@ thin entrypoints under `apps/<svc>/main.py` that import the shared package
 | `api` | `src/kospi_watcher/api/app.py` (`create_app`) via `apps/api/main.py` | 8000 | Main FastAPI app. Health, system status, agent list / mock-run / LLM run, live market quotes, order-proposal validation, risk evaluation, **paper trading** (orders / positions / account), audit-log listing. Owns persistence + seeding on startup. |
 | `agent-service` | `src/kospi_watcher/agent_service/app.py` via `apps/agent-service/main.py` | 8001 | Isolated ASGI app. **Analysis only**, no order-execution surface. Exposes `/health`, `/agents`, `/run`. |
 | `execution-gateway` | `src/kospi_watcher/execution_gateway/app.py` via `apps/execution-gateway/main.py` | 8002 | Isolated ASGI app. **No public submit endpoint** in this phase — exposes only `/health`. The submit path is in-process; `ExecutionGateway` allows the simulated `MOCK` and `PAPER` brokers and blocks any live broker. |
-| `worker` | `src/kospi_watcher/worker/scheduler.py` via `apps/worker/main.py` | — | APScheduler process: a `heartbeat` job (every 60s), a `mock_agent_sweep` job (every 15 min), and a `refresh_prediction` job (every 30 min) that runs all agents, synthesizes a fresh house prediction / daily brief, and persists it (§4e). Never creates orders. |
-| `web` | `apps/web/` (Next.js App Router) | 3000 | Next.js 15 / React 19 front end. Reads `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8000`). |
+| `worker` | `src/kospi_watcher/worker/scheduler.py` via `apps/worker/main.py` | — | APScheduler process: a `heartbeat` job (every 60s), a `mock_agent_sweep` job (every 15 min), a `scrape_news` job (every 60 min) that fetches the configured topics, stores new items, and prunes old ones (§4f), and a `refresh_prediction` job (every 30 min) that runs all agents, synthesizes a fresh (news-aware) house prediction / daily brief, and persists it (§4e, §4g). Never creates orders. |
+| `web` | `apps/web/` (Next.js App Router) | 3000 | Next.js 15 / React 19 front end — a **multi-page modern UI** (Pretendard font, dark fintech palette) with a sticky nav (오늘 / 예측 / 뉴스 / 에이전트 / 트레이딩 / 시스템) and a disclaimer + ownership footer (§6a). Reads `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8000`). |
 
-The `api` service mounts nine routers (`src/kospi_watcher/api/app.py`):
-`health` is mounted at the root; the other eight (`system`, `agents`,
-`prediction`, `market`, `order_proposals`, `risk`, `trading`, `audit_logs`) are
-mounted under `/api/v1`.
+The `api` service mounts ten routers (`src/kospi_watcher/api/app.py`):
+`health` is mounted at the root; the other nine (`system`, `agents`,
+`prediction`, `news`, `market`, `order_proposals`, `risk`, `trading`,
+`audit_logs`) are mounted under `/api/v1`.
 
-### The 18 `api` endpoints
+### The 21 `api` endpoints
 
 | Method | Path | Route module |
 |---|---|---|
@@ -93,6 +98,9 @@ mounted under `/api/v1`.
 | GET | `/api/v1/prediction/latest` | `api/routes/prediction.py` |
 | GET | `/api/v1/brief` | `api/routes/prediction.py` |
 | GET | `/api/v1/agents/org` | `api/routes/prediction.py` |
+| GET | `/api/v1/news` | `api/routes/news.py` |
+| GET | `/api/v1/news/dates` | `api/routes/news.py` |
+| POST | `/api/v1/news/scrape` | `api/routes/news.py` |
 | GET | `/api/v1/market/quotes` | `api/routes/market.py` |
 | POST | `/api/v1/order-proposals/validate` | `api/routes/order_proposals.py` |
 | POST | `/api/v1/risk/evaluate` | `api/routes/risk.py` |
@@ -105,9 +113,11 @@ mounted under `/api/v1`.
 
 `POST /api/v1/agents/run` runs the configured agent runtime (real LLM when armed,
 else the mock); the four `prediction.py` endpoints expose the product's primary
-surface — run/fetch the house prediction, the daily brief, and the desk org
-chart (§4d, §4e); `GET /api/v1/market/quotes` returns live (or mock) quotes; the
-five `trading.py` endpoints drive the secondary PAPER execution path (§4b).
+surface — run/fetch the house prediction (now carrying a visible deliberation,
+§4g), the daily brief, and the desk org chart (§4d, §4e); the three `news.py`
+endpoints list dated headlines, the available dates, and trigger a scrape (§4f);
+`GET /api/v1/market/quotes` returns live (or mock) quotes; the five `trading.py`
+endpoints drive the secondary PAPER execution path (§4b).
 
 CORS allows only `GET`/`POST`, origins from `cors_allow_origins`
 (default `http://localhost:3000`), and credentials are disabled.
@@ -118,8 +128,8 @@ CORS allows only `GET`/`POST`, origins from `cors_allow_origins`
                         ┌──────────────────────────────────────────────────────┐
                         │                      api  (:8000)                     │
                         │                kospi_watcher.api.app                  │
-   web (:3000) ──HTTP──▶│  routers: health, system, agents, prediction, market,│
-   Next.js              │           order-proposals, risk, trading, audit-logs │
+   web (:3000) ──HTTP──▶│  routers: health, system, agents, prediction, news,  │
+   Next.js              │     market, order-proposals, risk, trading, audit-logs│
                         │                       │                              │
                         │        ┌──────────────┼───────────────┐              │
                         │        ▼              ▼               ▼              │
@@ -173,12 +183,13 @@ src/kospi_watcher/
 │   ├── prediction/           # instruments (long/inverse ladder), regime, schemas, synthesizer
 │   ├── risk/                 # engine, limits, schemas
 │   └── execution/            # broker, order_state, paper, position
-├── infrastructure/           # db engine/session, redis client, market data
+├── infrastructure/           # db engine/session, redis client, market data, news
 │   ├── db.py
 │   ├── redis_client.py
-│   └── marketdata/           # base (Quote/Protocol), yahoo, mock, factory
+│   ├── marketdata/           # base (Quote/Protocol), yahoo, mock, factory
+│   └── news/                 # base (NewsItem/Protocol), google_rss, mock, factory
 ├── db/                       # ORM models, repositories, alembic-backed schema
-│   ├── models.py             # 10 tables
+│   ├── models.py             # 11 tables
 │   ├── types.py              # DecimalString TypeDecorator
 │   ├── repositories.py
 │   └── seed.py
@@ -186,6 +197,7 @@ src/kospi_watcher/
 ├── agent_service/            # isolated analysis ASGI app + service (mock + llm)
 ├── execution_gateway/        # isolated gateway ASGI app + ExecutionGateway
 ├── trading/                  # TradingService — the paper-execution orchestrator
+├── newsfeed/                 # NewsService — scrape → dedup-upsert → retention prune
 └── worker/                   # APScheduler jobs
 ```
 
@@ -473,17 +485,24 @@ MarketPrediction  ──▶ persisted in market_predictions  ──▶ GET /pred
   pulled toward `NEUTRAL`/`AVOID` in choppy or crisis regimes.
 - **Scenarios.** Three scenarios (base / reversal / sideways) whose
   probabilities are sized off `confidence` and **renormalised to sum to 1.0**.
-- **Brief.** `_brief` composes one continuous Korean narrative (regime → house
-  lean & confidence → lead desk's driver → Risk desk's caveat & invalidation →
-  long/inverse/곱버스 positioning), not a bag of disjoint captions.
+- **Brief.** `_brief` composes one continuous Korean narrative (예측 대상 →
+  regime → house lean & confidence → recent-news clause → lead desk's driver →
+  Risk desk's caveat & invalidation → long/inverse/곱버스 positioning), not a bag
+  of disjoint captions. When recent scraped headlines are supplied
+  (`synthesize(..., news_headlines=...)`, §4f), the brief weaves the top headline
+  in and the prediction records up to five in `news_refs`.
 
 `MarketPrediction` (`domain/prediction/schemas.py`, `PREDICTION_SCHEMA_VERSION =
-"1.0.0"`) carries `prediction_id`, `as_of`, `horizon` (default `D5`), `regime`,
-`direction`, `confidence`, `data_quality`, `headline`, `brief`, `desk_views`,
-`instrument_stances`, `scenarios`, `generated_by` (`"mock"|"llm"`), and
-`agent_count`. `generated_by` is the runtime that actually produced the findings,
-so the synthesis is honest about its inputs while remaining deterministic over
-them.
+"1.0.0"`) carries `prediction_id`, `as_of`, `subject` (default
+`"코스피200 지수 방향"`; the synthesizer sets `"코스피200 지수 방향 (KODEX 200 추종
+기준)"`), `horizon` (default `D5`), `horizon_label` (a Korean label for the
+horizon), `regime`, `direction`, `confidence`, `data_quality`, `headline`,
+`brief`, `desk_views`, `deliberation` (the visible discussion, §4g),
+`instrument_stances`, `scenarios`, `news_refs`, `generated_by` (`"mock"|"llm"`),
+and `agent_count`. `generated_by` is the runtime that actually produced the
+findings, so the synthesis is honest about its inputs while remaining
+deterministic over them. The prediction is thus explicitly **labelled** with what
+it is about (`subject`) and over what horizon (`horizon_label`).
 
 **Endpoints** (`api/routes/prediction.py`, under `/api/v1`):
 
@@ -498,7 +517,114 @@ them.
 
 **Worker.** The `refresh_prediction` job (every 30 min, `worker/scheduler.py`)
 regenerates and persists a fresh prediction so `/prediction/latest` and `/brief`
-stay current without a manual `POST`.
+stay current without a manual `POST`. It now pulls `repositories.recent_headlines`
+first and passes them to `PredictionService.generate(news_headlines=...)`, so the
+scheduled brief is **news-aware** (§4f); the `POST /prediction/run` route does the
+same.
+
+---
+
+## 4f. News scraping & retention (keyless Google News RSS)
+
+A small provider abstraction in `infrastructure/news/` scrapes Korean-market news
+without an API key, and a `NewsService` stores it in a dated, retention-pruned
+table that feeds the daily brief (ADR-018):
+
+- **`base.py`** defines the `NewsItem` model (`id`, `title`, `url`, `source`,
+  `topic`, `published_at` as `AwareDatetime`, optional `summary`; `extra="forbid"`),
+  the `make_item_id(url, title)` helper (a stable `sha256` hex truncated to 32
+  chars, keyed off the canonical URL, falling back to the title), and the
+  `NewsProvider` `Protocol`. The contract mirrors the market-data one: providers
+  **must never raise** from `fetch` — they return `[]` on failure so scraping
+  degrades safely.
+- **`google_rss.py` (`GoogleNewsProvider`, `name="google"`)** fetches the public
+  **Google News RSS** search endpoint (`https://news.google.com/rss/search`,
+  params `q=<topic>&hl=ko&gl=KR&ceid=KR:ko`) — **no API key**; a browser
+  `User-Agent` is sent. The XML is parsed with **`defusedxml`**
+  (`defusedxml.ElementTree.fromstring`), guarding against XML-entity-expansion
+  attacks. It **never raises**: any `httpx.HTTPError`, `ParseError`, `ValueError`,
+  or `DefusedXmlException`, or a non-200 status, yields `[]`. Per-item it strips
+  the trailing `" - <source>"` suffix from the title, derives the id via
+  `make_item_id`, and parses `pubDate` (RFC-2822, falling back to `now_utc()` and
+  UTC-stamping naive dates). The `httpx.AsyncClient` is injectable for offline
+  tests; `aclose()` disposes a self-owned client.
+- **`mock.py` (`MockNewsProvider`, `name="mock"`)** returns deterministic,
+  clearly-labelled `[MOCK]` headlines and never touches the network.
+- **`factory.py`** (`get_news_provider`) selects the backend by the
+  `news_provider` setting (`"google"` default, else `"mock"`) and caches a
+  process-wide singleton; `reset_news_provider()` disposes it (and closes the
+  Google client) for tests.
+
+**`NewsService.scrape`** (`newsfeed/service.py`) is the orchestrator: for each of
+the configured `news_topics` it calls `provider.fetch`, **dedups by item id**
+across topics, **upserts** the new items (`repositories.upsert_news`, which inserts
+only ids not already stored), then **prunes** everything older than
+`news_retention_days` (`repositories.prune_news`, `published_at < now − retention`)
+so the feed never accumulates stale history. It returns a `ScrapeResult`
+(`fetched`, `added`, `pruned`, `topics`).
+
+Rows live in `news_items` (`NewsItemRow`, §5, migration `0004`). On upsert the
+KST calendar day is computed (`to_kst(published_at).date()`) and stored as the
+`date_kst` string so the UI and `news_dates` can group by Korean day.
+Repositories: `upsert_news`, `prune_news`, `list_news(date_kst?, limit)`,
+`news_dates` (date → count), and `recent_headlines(limit=8)` (the titles the brief
+consumes).
+
+**Endpoints** (`api/routes/news.py`, under `/api/v1`): `GET /news`
+(recent items, optional `?date=YYYY-MM-DD` and `limit`), `GET /news/dates`
+(available KST dates with counts), `POST /news/scrape` (run a scrape now → returns
+the `ScrapeResult` counts). The `scrape_news` worker job runs the same path every
+**60 min**.
+
+Settings (`config.py`): `news_provider` (`"google"|"mock"`, default `"google"`),
+`news_retention_days` (default `14`), `news_topics` (default the Korean topics
+`코스피 증시`, `코스닥`, `원달러 환율`, `삼성전자 반도체`). New dependency:
+**`defusedxml>=0.7`** (added to both `pyproject.toml` and `requirements.txt`).
+
+---
+
+## 4g. Deliberation (agent discussion → reconciliation)
+
+Every prediction now carries the **visible discussion** that produced it, so the
+house view is not a black box (ADR-019). The same pure, deterministic synthesizer
+(§4e) records, alongside the numeric desk views, a `Deliberation`
+(`domain/prediction/schemas.py`) built in `synthesizer.py`:
+
+```
+each agent finding ──▶ AgentPosition (agent, is_lead, direction, confidence, note)
+        │
+        ▼  per analysis desk
+_desk_deliberation ──▶ DeskDeliberation
+        consensus = the desk's lean (§4e), agreement = aligned / responded,
+        dissent = members whose direction opposes the consensus,
+        lead_note = the desk lead reconciling "X/Y agreed; N dissents weighted in"
+        │
+        ▼  across the four directional desks
+_chief_deliberation ──▶ ChiefDeliberation
+        overall = the house direction, aligned_desks vs conflicted_desks
+        (by desk lean vs the house view), note = the cross-desk reconciliation
+        │
+        ▼
+Deliberation { desks: [DeskDeliberation…], chief: ChiefDeliberation }  → MarketPrediction.deliberation
+```
+
+- **Desk positions.** `_desk_deliberation` lists each responding member's
+  `AgentPosition` (with `is_lead` and a trimmed thesis `note`), takes the desk's
+  `lean` as the `consensus`, computes `agreement` as the share of positions that
+  match the consensus, flags the opposing members as `dissent`, and writes a
+  `lead_note` in the desk lead's voice ("리드: N/M건 합의, 이견 K건은 리드가
+  가중·조율").
+- **Chief reconciliation.** `_chief_deliberation` partitions the four directional
+  desks into `aligned_desks` (desks whose lean matches the house direction) and
+  `conflicted_desks` (desks that oppose it), reports the aligned **weight**, and
+  writes the `note` that concludes the house direction and confidence — or that
+  the desks were split and so the synthesis is `NEUTRAL`.
+
+Because this is the same deterministic pass over the findings, the deliberation is
+**reproducible** and identical over mock-or-LLM findings; it simply makes the
+existing desk→chief aggregation legible. The web `/prediction` page renders it as
+a thread (desk cards with per-agent positions and dissent highlights, then a Chief
+reconciliation card); see §7.
 
 ---
 
@@ -525,9 +651,10 @@ ADR-012):
 - Alembic uses `render_as_batch=True` (`alembic/env.py`) so SQLite ALTERs work,
   and pulls the URL from `Settings`.
 
-The ten tables (`db/models.py`); migration `alembic/versions/0001_initial.py`
+The eleven tables (`db/models.py`); migration `alembic/versions/0001_initial.py`
 creates the first six, `0002_paper_trading.py` adds `orders` / `fills` /
-`positions`, and `0003_predictions.py` adds `market_predictions`:
+`positions`, `0003_predictions.py` adds `market_predictions`, and
+`0004_news.py` adds `news_items`:
 
 | Table | Model | Notes |
 |---|---|---|
@@ -540,6 +667,7 @@ creates the first six, `0002_paper_trading.py` adds `orders` / `fills` /
 | `fills` | `FillRow` | one simulated fill; FK → `orders.id`; `price` via `DecimalString` (migration `0002`). |
 | `positions` | `PositionRow` | **composite PK `(account, symbol)`**; signed `quantity`, `avg_cost`, `realized_pnl` via `DecimalString` (migration `0002`). |
 | `market_predictions` | `PredictionRow` | one stored house prediction + daily brief; scalar columns (`as_of`/`direction`/`confidence`/`regime`/`headline`/`brief`/`generated_by`/`agent_count`) index the latest view, the full `MarketPrediction` lives in `payload` (`JSON`); `created_at` indexed for "latest" (migration `0003`). |
+| `news_items` | `NewsItemRow` | one scraped headline; `id` PK (stable `sha256` of the URL, dedup target); `date_kst` (indexed) groups by Korean calendar day; `topic`/`published_at` indexed; pruned past `news_retention_days` (§4f, migration `0004`). |
 | `audit_logs` | `AuditLogRow` | **append-only** (ADR-006) — application code only inserts (`add_audit_log`); autoincrement integer id. |
 
 On `api` startup the lifespan runs `Base.metadata.create_all` (dev convenience;
@@ -577,6 +705,39 @@ a no-op once Alembic has built the schema) and seeds instruments idempotently.
 
 ---
 
+## 6a. Web UI (multi-page modern redesign)
+
+The front end (`apps/web/`, Next.js App Router) is a **multi-page modern UI**
+(ADR-019). The root layout (`app/layout.tsx`) loads the **Pretendard** variable
+font from a CDN and wraps every page in a sticky `NavBar` and a `SiteFooter`
+(`components/nav.tsx`); the palette is a dark fintech theme defined as CSS
+variables in `app/globals.css` (consumed by `tailwind.config.ts`), and it follows
+the **Korean convention up = red (`--up`), down = blue (`--down`)**.
+
+- **Nav.** `오늘`(`/`) · `예측`(`/prediction`) · `뉴스`(`/news`) ·
+  `에이전트`(`/agents`) · `트레이딩`(`/trading`) · `시스템`(`/system`), plus a
+  standing `RESEARCH` mode chip. There are also `/dashboard` and `/risk` pages.
+- **오늘 (home).** A concise daily-brief landing: a live quote strip, the hero
+  prediction (direction / confidence / regime, labelled with `subject` and
+  `horizon_label`), the narrative brief with its reflected `news_refs`, the
+  long/inverse/곱버스 stance ladder, and **banner-button navigation** to the
+  detail pages.
+- **예측.** The desk org chart by tier, plus — when a prediction exists — the
+  **deliberation thread** (per-desk cards with each agent's position and dissent
+  highlights) and a **Chief reconciliation** card (aligned vs conflicted desks),
+  the 예측 대상 / 기간 labels, the instrument stances, scenarios, and the brief
+  (§4g).
+- **뉴스.** Dated headlines grouped by KST day, a date filter rail (from
+  `/news/dates`), a scrape button, and a "retention — older items auto-deleted"
+  note (§4f).
+- **Footer.** A **면책 고지 (disclaimer)** — the service is information-only, not
+  investment advice; predictions/stances are algorithm/agent-generated references;
+  inverse/leveraged (곱버스) products carry decay and principal-loss risk; data
+  sources (Yahoo / Google News) and the mock-or-LLM runtime are named; no live
+  trading — and an **ownership** line, `© 2026 YellowScale · 안민규(Minkyu An)`.
+
+---
+
 ## 7. Tech stack & versions
 
 Backend pins from `pyproject.toml` (`requires-python = ">=3.13"`; developed and
@@ -598,6 +759,7 @@ tested on Python 3.14 per ADR-012):
 | structlog | `structlog>=24.4` |
 | PyYAML | `pyyaml>=6.0` |
 | tzdata | `tzdata>=2024.2` |
+| defusedxml | `defusedxml>=0.7` |
 | asyncpg (prod extra) | `asyncpg>=0.30` |
 
 Dev tooling: `pytest>=8.3`, `pytest-asyncio>=0.25`, `ruff>=0.8`, `mypy>=1.14`.
@@ -606,7 +768,12 @@ Ruff line length 100, target `py313`; mypy in strict-ish mode
 
 Front end (`apps/web/package.json`): **Next.js ^15.1.0**, **React ^19.0.0**,
 TypeScript ^5.7, Tailwind ^3.4, `@tanstack/react-query` ^5.62, `zod` ^3.24,
-Vitest ^2.1.
+Vitest ^2.1. The UI is a **multi-page modern redesign**: the **Pretendard**
+variable font (loaded from a CDN in `app/layout.tsx`) over a dark fintech palette
+(`app/globals.css` / `tailwind.config.ts`), a sticky `NavBar` + `SiteFooter`
+(`components/nav.tsx`, in the root layout) with the Korea up=red / down=blue
+convention, and pages `오늘`(`/`) · `예측`(`/prediction`) · `뉴스`(`/news`) ·
+`에이전트`(`/agents`) · `트레이딩`(`/trading`) · `시스템`(`/system`). See §6a.
 
 ---
 

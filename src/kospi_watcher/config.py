@@ -63,6 +63,15 @@ class Settings(BaseSettings):
     # "yahoo" = real, keyless quotes (KOSPI/USDKRW/ETFs); "mock" = offline.
     market_data_provider: str = "yahoo"
     market_data_ttl_seconds: int = 60
+
+    # --- News ---
+    # "google" = keyless Google News RSS; "mock" = offline. Old items are pruned
+    # past the retention window.
+    news_provider: str = "google"
+    news_retention_days: int = 14
+    news_topics: list[str] = Field(
+        default_factory=lambda: ["코스피 증시", "코스닥", "원달러 환율", "삼성전자 반도체"]
+    )
     market_data_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"

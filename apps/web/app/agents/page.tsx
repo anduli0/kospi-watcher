@@ -26,7 +26,7 @@ export default function AgentsPage() {
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
-      <PageHeader title="Agents" subtitle="21개 분석 에이전트 — 분석만 수행, 주문 권한 없음" />
+      <PageHeader title="에이전트" subtitle="21개 분석 에이전트 — 분석만 수행, 주문 권한 없음" />
       <div className="mt-6">
         <MockNotice />
       </div>
@@ -71,7 +71,7 @@ export default function AgentsPage() {
 
       {(run || runError) && (
         <section className="mt-8">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">Mock run 결과</h2>
+          <h2 className="section-label">Mock run 결과</h2>
           <div className="mt-3 card">
             {runError ? (
               <p className="font-mono text-xs text-danger break-all">{runError}</p>

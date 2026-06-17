@@ -26,8 +26,9 @@ if TYPE_CHECKING:
 _TEST_DB = Path(tempfile.gettempdir()) / "kospi_watcher_pytest.db"
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TEST_DB.as_posix()}"
 os.environ["REDIS_URL"] = ""
-# Offline, deterministic market data in tests (no network calls to Yahoo).
+# Offline, deterministic market data + news in tests (no network calls).
 os.environ["MARKET_DATA_PROVIDER"] = "mock"
+os.environ["NEWS_PROVIDER"] = "mock"
 for _k in ("LIVE_TRADING_ENABLED", "AUTO_EXECUTION_ENABLED", "TRADING_MODE"):
     os.environ.pop(_k, None)
 
@@ -61,10 +62,12 @@ async def client(_db: None) -> AsyncIterator[AsyncClient]:
 
     from kospi_watcher.api.app import create_app
     from kospi_watcher.infrastructure.marketdata import reset_market_data_provider
+    from kospi_watcher.infrastructure.news import reset_news_provider
     from kospi_watcher.infrastructure.redis_client import reset_redis
 
     await reset_redis()
     await reset_market_data_provider()
+    await reset_news_provider()
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as c:

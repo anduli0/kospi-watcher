@@ -19,12 +19,37 @@ direction/confidence, **long / inverse / leveraged-inverse (곱버스) instrumen
 stances** over `069500`/`122630`/`114800`/`252670`, three scenarios, and a Korean
 brief — **identical over mock-or-LLM findings** (it is deterministic over the
 findings; `generated_by` records only whether they came from `"mock"` or
-`"llm"`). New endpoints: `POST /api/v1/prediction/run`,
-`GET /api/v1/prediction/latest`, `GET /api/v1/brief`, `GET /api/v1/agents/org`;
-predictions persist in `market_predictions` and a worker `refresh_prediction` job
-(every 30 min) keeps the latest brief current. Predictions/stances are
-**display-only** — they are NOT order authority (the inverse/곱버스 ETFs are
-`tradable=false`, and any order still passes the deny-by-default Risk Engine).
+`"llm"`). The prediction now also carries a **visible deliberation** — each
+agent's position → the desk lead's consensus-vs-dissent reconciliation (an
+`agreement` ratio) → the Chief's aligned-vs-conflicted cross-desk reconciliation
+into the house view (`Deliberation`/`DeskDeliberation`/`ChiefDeliberation` in
+`domain/prediction/schemas.py`, built in the **same deterministic pass**, ADR-019)
+— and is explicitly **labelled** with its `subject` ("코스피200 지수 방향 …") and
+`horizon_label`. The daily brief is **news-aware**: it weaves in recent scraped
+headlines (`PredictionService.generate(news_headlines=…)`, populated from
+`repositories.recent_headlines`) and lists them as `news_refs`, without changing
+the deterministic math.
+
+**News scraping (keyless, dated, retention).** A keyless **Google News RSS**
+provider (`infrastructure/news/`, parsed with **`defusedxml`**, never raises,
+mock fallback) feeds `NewsService.scrape` (`newsfeed/service.py`), which dedups,
+upserts, and **prunes anything older than `news_retention_days` (default 14)**
+into the dated `news_items` table (grouped by KST `date_kst`). It feeds the daily
+brief; a worker `scrape_news` job (every 60 min) keeps it current (ADR-018).
+
+New endpoints: `POST /api/v1/prediction/run`, `GET /api/v1/prediction/latest`,
+`GET /api/v1/brief`, `GET /api/v1/agents/org`, `GET /api/v1/news`,
+`GET /api/v1/news/dates`, `POST /api/v1/news/scrape`; predictions persist in
+`market_predictions` and a worker `refresh_prediction` job (every 30 min) keeps
+the latest (news-aware) brief current. Predictions/stances are **display-only** —
+they are NOT order authority (the inverse/곱버스 ETFs are `tradable=false`, and any
+order still passes the deny-by-default Risk Engine).
+
+The web is a **modern multi-page UI** (Pretendard font, dark fintech palette,
+Korea up=red/down=blue) with an 오늘 / 예측 / 뉴스 / 에이전트 / 트레이딩 / 시스템
+nav and a **disclaimer + ownership footer** (`© 2026 YellowScale · 안민규`);
+`/prediction` renders the deliberation thread + Chief reconciliation, `/news` the
+dated headlines (ADR-019).
 
 It has two halves with a hard wall between them:
 
@@ -95,16 +120,19 @@ src/kospi_watcher/        # the package (src-layout, ADR-011)
                           #   execution/{paper,position}.py = PAPER fills + PnL (ADR-014)
   infrastructure/         # db engine/session, redis client (fakeredis fallback)
                           #   marketdata/ = keyless Yahoo + mock provider (ADR-013)
-  db/                     # ORM models (10 tables), repositories, custom types, seed
+                          #   news/ = keyless Google News RSS + mock provider (ADR-018)
+  db/                     # ORM models (11 tables), repositories, custom types, seed
   api/                    # FastAPI app, routes, request/response schemas
   agent_service/          # isolated analysis service (mock + llm) + PredictionService
   execution_gateway/      # isolated execution boundary (app + gateway)
   trading/                # TradingService — the PAPER execution orchestrator
-  worker/                 # APScheduler jobs (heartbeat, mock_agent_sweep, refresh_prediction)
+  newsfeed/               # NewsService — scrape → dedup-upsert → retention prune (ADR-018)
+  worker/                 # APScheduler jobs (heartbeat, mock_agent_sweep,
+                          #   scrape_news, refresh_prediction)
 apps/                     # per-service entry points (api, agent-service,
-                          # execution-gateway, worker) + web (Next.js)
-alembic/                  # three migrations (0001 initial, 0002 paper trading,
-                          #   0003 market_predictions), SQLite + Postgres compatible
+                          # execution-gateway, worker) + web (Next.js, modern multi-page UI)
+alembic/                  # four migrations (0001 initial, 0002 paper trading,
+                          #   0003 market_predictions, 0004 news), SQLite + Postgres compatible
 config/                   # risk_limits.yml, instruments.yml (+ agents/strategies)
 docs/                     # ARCHITECTURE, DATA_DICTIONARY, AGENT_DESIGN, PRODUCT_SPEC,
                           # TRADING_SAFETY, THREAT_MODEL, RUNBOOK, ULTRAPLAN, adr/
@@ -146,11 +174,18 @@ in-memory fakeredis (reported honestly at `/health`). Copy `.env.example` →
 
 ```powershell
 # Prediction + daily brief (the primary product surface) — no opt-in needed:
-# POST /api/v1/prediction/run  → run all agents, synthesize, persist, return MarketPrediction.
+# POST /api/v1/prediction/run  → run all agents, synthesize, persist, return MarketPrediction
+#                                (now incl. a visible deliberation + subject/horizon labels + news_refs).
 # GET  /api/v1/prediction/latest  → latest stored prediction (404 until first run).
 # GET  /api/v1/brief              → latest daily brief (headline + narrative + long/inverse/곱버스 stances).
 # GET  /api/v1/agents/org         → the 5-desk + Chief research hierarchy (read-only).
 # The worker's refresh_prediction job (every 30 min) keeps latest/brief current.
+
+# News scraping (keyless Google News RSS) feeds the daily brief — no opt-in needed:
+# POST /api/v1/news/scrape  → fetch configured topics, dedup-upsert, prune past retention.
+# GET  /api/v1/news[?date=YYYY-MM-DD]  → dated headlines;  GET /api/v1/news/dates → dates + counts.
+# The worker's scrape_news job (every 60 min) keeps it current. Force offline mock if needed:
+$env:NEWS_PROVIDER = "mock"   # default "google" (keyless); NEWS_RETENTION_DAYS defaults to 14.
 
 # Live market data is ON by default (keyless Yahoo). Force offline mock if needed:
 $env:MARKET_DATA_PROVIDER = "mock"
@@ -201,15 +236,20 @@ until run on a host with Docker.
 ## Where to read more
 
 - `docs/ARCHITECTURE.md` — components, layering, data flow (incl. market data §4a,
-  paper execution §4b, agent runtimes §4c, the research-desk org §4d, and the
-  prediction / daily-brief engine §4e).
+  paper execution §4b, agent runtimes §4c, the research-desk org §4d, the
+  prediction / daily-brief engine §4e, news scraping & retention §4f, the agent
+  deliberation §4g, and the multi-page web UI §6a).
 - `docs/DATA_DICTIONARY.md` — every table, enum, schema field, and key settings.
-- `docs/AGENT_DESIGN.md` — the 21 agents, the finding contract, the runtimes, and
-  the desk org + prediction synthesis (§7).
+- `docs/AGENT_DESIGN.md` — the 21 agents, the finding contract, the runtimes, the
+  desk org + prediction synthesis (§7), the deliberation & reconciliation (§7.5),
+  and the news-aware brief (§7.6).
 - `docs/PRODUCT_SPEC.md` — product goals; §12 covers the prediction engine +
-  daily brief + the long/short (인버스/곱버스) ladder.
+  daily brief + the long/short (인버스/곱버스) ladder; §13 covers news scraping +
+  the visible agent deliberation + the UI/disclaimer.
 - `docs/TRADING_SAFETY.md` — the risk checks, kill-switch model, and the
   PAPER-implemented / LIVE-not-implemented boundary (§12).
-- `docs/adr/` — the 17 architecture decision records (ADR-013/014/015 cover the
+- `docs/adr/` — the 19 architecture decision records (ADR-013/014/015 cover the
   market-data, paper-execution, and LLM-runtime decisions; ADR-016/017 cover the
-  research-desk org and the deterministic prediction / daily-brief engine).
+  research-desk org and the deterministic prediction / daily-brief engine;
+  ADR-018/019 cover keyless news scraping + the visible deliberation and modern
+  multi-page UI).

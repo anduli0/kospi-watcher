@@ -79,6 +79,31 @@ def test_synthesis_structure_over_mock() -> None:
     assert pred.headline
 
 
+def test_synthesis_includes_deliberation() -> None:
+    pred = synthesize(_mock_findings(), generated_by="mock")
+    delib = pred.deliberation
+    assert delib is not None
+    # 5 analysis desks deliberate (data-integrity + the 4 directional); Chief is separate.
+    assert len(delib.desks) == 5
+    assert all(d.positions for d in delib.desks)
+    assert all(d.lead_note for d in delib.desks)
+    # Chief reconciles to the same overall direction as the prediction.
+    assert delib.chief.overall is pred.direction
+    assert delib.chief.note
+
+
+def test_brief_reflects_news_and_subject() -> None:
+    pred = synthesize(
+        _mock_findings(),
+        generated_by="mock",
+        news_headlines=["[TEST] 코스피 외국인 순매수 전환"],
+    )
+    assert pred.news_refs == ["[TEST] 코스피 외국인 순매수 전환"]
+    assert "[TEST] 코스피 외국인 순매수 전환" in pred.brief
+    assert pred.subject in pred.brief  # the prediction subject is labeled
+    assert pred.horizon_label  # horizon is labeled
+
+
 def test_synthesis_stances_consistent_with_direction() -> None:
     pred = synthesize(_mock_findings(), generated_by="mock")
     by_symbol = {s.symbol: s for s in pred.instrument_stances}

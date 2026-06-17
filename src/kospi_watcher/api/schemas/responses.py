@@ -163,6 +163,8 @@ class BriefStance(BaseModel):
 
 class BriefResponse(BaseModel):
     as_of: datetime
+    subject: str
+    horizon_label: str
     generated_by: str
     agent_count: int
     direction: str
@@ -170,6 +172,7 @@ class BriefResponse(BaseModel):
     regime: str
     headline: str
     brief: str
+    news_refs: list[str]
     stances: list[BriefStance]
 
 
@@ -186,6 +189,38 @@ class OrgResponse(BaseModel):
     desks: list[OrgDeskInfo]
     tiers: list[str]
     agent_count: int
+
+
+class NewsItemResponse(BaseModel):
+    id: str
+    title: str
+    url: str
+    source: str
+    topic: str
+    published_at: datetime
+    date_kst: str
+
+
+class NewsListResponse(BaseModel):
+    count: int
+    date: str | None
+    items: list[NewsItemResponse]
+
+
+class NewsDateCount(BaseModel):
+    date: str
+    count: int
+
+
+class NewsDatesResponse(BaseModel):
+    dates: list[NewsDateCount]
+
+
+class ScrapeResponse(BaseModel):
+    fetched: int
+    added: int
+    pruned: int
+    topics: list[str]
 
 
 class AuditLogEntry(BaseModel):

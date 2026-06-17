@@ -14,8 +14,10 @@ contract. It is written to match the code exactly. The source of truth is:
 - `src/kospi_watcher/domain/agents/org.py` — the desk org chart (`Desk`, `Tier`,
   `DeskSpec`, `AGENT_ORG`); how the 21 agents map to 5 desks + a Chief (§7).
 - `src/kospi_watcher/domain/prediction/` — `instruments.py` (the long/inverse ladder +
-  `stance_for`), `regime.py`, `schemas.py`, and the `synthesizer.py` that aggregates
-  desk views into the house prediction (§7.3, ARCHITECTURE §4e).
+  `stance_for`), `regime.py`, `schemas.py` (incl. the `Deliberation` /
+  `DeskDeliberation` / `ChiefDeliberation` / `AgentPosition` discussion contracts),
+  and the `synthesizer.py` that aggregates desk views into the house prediction and
+  builds the visible deliberation (§7.3, §7.5, ARCHITECTURE §4e, §4g).
 - `src/kospi_watcher/agent_service/service.py` and `app.py` — the isolated service
   (`run_mock`, the runtime-aware async `run`, and the concurrent `run_all`).
 - `src/kospi_watcher/domain/enums.py` — the enum value sets (incl. `InstrumentKind`,
@@ -452,3 +454,67 @@ So under a confident **bearish / RISK_OFF** house view the brief overweights `11
 or avoiding the longs; under a confident **bullish** view the inverses are
 underweighted/avoided. See ARCHITECTURE §4e for the end-to-end flow and ADR-017 for the
 decision.
+
+### 7.5 Deliberation & reconciliation (the visible discussion)
+
+The same aggregation in §7.3 produces numbers; the synthesizer now also records the
+**discussion** behind those numbers so the house view is explainable rather than a
+black box (ADR-019, ARCHITECTURE §4g). It is the **same deterministic pass** over the
+findings — no extra agent run, no LLM — so the deliberation is fully reproducible and
+identical over mock-or-LLM findings. The contracts live in
+`domain/prediction/schemas.py`:
+
+- **`AgentPosition`** — one agent's stated stance inside its desk:
+  `agent`, `is_lead`, `direction`, `confidence`, and a trimmed `note` (the agent's
+  thesis). Built in `_desk_deliberation` for every member of the desk that responded.
+- **`DeskDeliberation`** — how one desk debated and the lead reconciled it:
+  `desk`, `title`, `consensus`, `agreement`, `positions` (the `AgentPosition`s),
+  `dissent`, and `lead_note`.
+- **`ChiefDeliberation`** — how the Chief weighed the desks into the house view:
+  `overall`, `aligned_desks`, `conflicted_desks`, and `note`.
+- **`Deliberation`** — `{ desks: [DeskDeliberation…], chief: ChiefDeliberation }`,
+  carried on `MarketPrediction.deliberation`.
+
+**How a desk reconciles consensus vs dissent (`_desk_deliberation`).** Each
+responding member becomes an `AgentPosition` (the desk **lead** flagged via
+`is_lead`). The desk's `consensus` is its `lean` from §7.3 (the
+impact×confidence, lead-weighted score, leaning past the ±0.15 band). The
+**`agreement` ratio** is the share of positions whose direction matches the
+consensus — `len(aligned) / len(positions)` (`0.0` when no one responded). Members
+whose direction is the **strict opposite** of the consensus (bullish-vs-bearish;
+neutral is never counted as dissent) are listed in `dissent`. The `lead_note` is
+written in the desk lead's voice — e.g. *"<lead>(리드): N/M건 <방향> 합의, 이견 K건
+(<dissenters>)은 리드가 가중·조율"* — making explicit that the lead's ×1.5 weight is
+how the dissent was reconciled into the single desk view, not silently dropped.
+
+**How the Chief reconciles desks (`_chief_deliberation`).** Over the **four
+directional desks** (`DIRECTIONAL_DESKS`), the Chief partitions them by their lean
+versus the **house `direction`** (the desk-weight-weighted score from §7.3):
+`aligned_desks` are the desks whose lean matches the house view, `conflicted_desks`
+are the desks that take the strict-opposite lean. The Chief also sums the
+**aligned weight** (`Σ desk.weight` over the aligned desks) and writes the `note`
+that states how many desks supported the call at what weight, how many dissented,
+and the resulting house direction + confidence — or, when the desks are split so the
+overall score stays inside the ±0.12 band, that the house view is `NEUTRAL`. This is
+the cross-desk analogue of a desk lead: the Chief composes (it does not itself vote;
+weight 0, §7.1).
+
+In short, the deliberation **surfaces the existing math as a conversation**: each
+agent's position → the desk lead's consensus-vs-dissent reconciliation (with an
+agreement ratio) → the Chief's aligned-vs-conflicted cross-desk reconciliation into
+the house view. The web `/prediction` page renders this thread directly
+(ARCHITECTURE §6a).
+
+### 7.6 News-aware brief
+
+The daily brief now incorporates **scraped news headlines**. `PredictionService.generate`
+takes an optional `news_headlines=` list, which the `POST /prediction/run` route and
+the worker's `refresh_prediction` job both populate from
+`repositories.recent_headlines` (the most recent scraped titles; see ARCHITECTURE
+§4f for the keyless Google-News-RSS scraping + dated, retention-pruned store). The
+synthesizer keeps up to five non-empty headlines as `MarketPrediction.news_refs` and
+weaves the top one into the Korean narrative (*"최근 '<headline>' 등 뉴스 흐름도 함께
+반영했다"*). News only **informs the narrative and is shown as references** — it does
+not change the deterministic desk/chief math, which remains a pure function of the
+agent findings. (The agents themselves remain analysis-only; the brief's news
+context is added at synthesis time, not by giving any agent order authority.)

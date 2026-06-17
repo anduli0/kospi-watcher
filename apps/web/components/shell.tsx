@@ -1,23 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError } from "@/lib/api";
-
-/** RESEARCH-mode / live-disabled banner shown on every page. */
-export function SafetyBanner() {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="rounded-full border border-border bg-elevated px-3 py-1 font-mono text-xs text-muted">
-        MODE: RESEARCH
-      </span>
-      <span className="rounded-full border border-danger/40 bg-danger/10 px-3 py-1 font-mono text-xs font-semibold text-danger">
-        ● LIVE TRADING DISABLED
-      </span>
-    </div>
-  );
-}
 
 export function MockNotice() {
   return (
@@ -30,15 +15,9 @@ export function MockNotice() {
 
 export function PageHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
-    <header className="flex flex-wrap items-start justify-between gap-4">
-      <div>
-        <Link href="/" className="font-mono text-xs text-muted hover:text-accent">
-          ← KOSPI-WATCHER
-        </Link>
-        <h1 className="mt-1 font-mono text-2xl font-semibold tracking-tight">{title}</h1>
-        {subtitle ? <p className="mt-1 text-sm text-muted">{subtitle}</p> : null}
-      </div>
-      <SafetyBanner />
+    <header>
+      <h1 className="text-3xl font-semibold tracking-tight">{title}</h1>
+      {subtitle ? <p className="mt-2 max-w-2xl text-sm text-muted">{subtitle}</p> : null}
     </header>
   );
 }

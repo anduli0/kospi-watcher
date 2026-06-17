@@ -160,10 +160,42 @@ export interface Scenario {
   triggers: string[];
 }
 
+export interface AgentPosition {
+  agent: string;
+  is_lead: boolean;
+  direction: Direction;
+  confidence: number;
+  note: string;
+}
+
+export interface DeskDeliberation {
+  desk: string;
+  title: string;
+  consensus: Direction;
+  agreement: number;
+  positions: AgentPosition[];
+  dissent: string[];
+  lead_note: string;
+}
+
+export interface ChiefDeliberation {
+  overall: Direction;
+  aligned_desks: string[];
+  conflicted_desks: string[];
+  note: string;
+}
+
+export interface Deliberation {
+  desks: DeskDeliberation[];
+  chief: ChiefDeliberation;
+}
+
 export interface MarketPrediction {
   prediction_id: string;
   as_of: string;
+  subject: string;
   horizon: string;
+  horizon_label: string;
   regime: string;
   direction: Direction;
   confidence: number;
@@ -171,10 +203,44 @@ export interface MarketPrediction {
   headline: string;
   brief: string;
   desk_views: DeskView[];
+  deliberation: Deliberation | null;
   instrument_stances: InstrumentStance[];
   scenarios: Scenario[];
+  news_refs: string[];
   generated_by: string;
   agent_count: number;
+}
+
+export interface NewsItem {
+  id: string;
+  title: string;
+  url: string;
+  source: string;
+  topic: string;
+  published_at: string;
+  date_kst: string;
+}
+
+export interface NewsListResponse {
+  count: number;
+  date: string | null;
+  items: NewsItem[];
+}
+
+export interface NewsDateCount {
+  date: string;
+  count: number;
+}
+
+export interface NewsDatesResponse {
+  dates: NewsDateCount[];
+}
+
+export interface ScrapeResponse {
+  fetched: number;
+  added: number;
+  pruned: number;
+  topics: string[];
 }
 
 export interface BriefStance {
@@ -349,6 +415,12 @@ export const api = {
   latestPrediction: () => request<MarketPrediction>("/api/v1/prediction/latest"),
   brief: () => request<BriefResponse>("/api/v1/brief"),
   agentsOrg: () => request<OrgResponse>("/api/v1/agents/org"),
+  news: (date?: string, limit = 60) =>
+    request<NewsListResponse>(
+      `/api/v1/news?limit=${limit}` + (date ? `&date=${date}` : ""),
+    ),
+  newsDates: () => request<NewsDatesResponse>("/api/v1/news/dates"),
+  scrapeNews: () => request<ScrapeResponse>("/api/v1/news/scrape", { method: "POST" }),
   validateProposal: (proposal: OrderProposalInput) =>
     request<{ valid: boolean; proposal_id: string; detail: string }>(
       "/api/v1/order-proposals/validate",

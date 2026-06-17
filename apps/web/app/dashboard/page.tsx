@@ -19,14 +19,14 @@ export default function DashboardPage() {
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
-      <PageHeader title="Dashboard" subtitle="시스템 상태 · 에이전트 · 최근 감사 로그" />
+      <PageHeader title="대시보드" subtitle="시스템 상태 · 에이전트 · 최근 감사 로그" />
       <div className="mt-6">
         <MockNotice />
       </div>
 
       <section className="mt-8 grid gap-4 sm:grid-cols-3">
         <div className="card">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">Health</h2>
+          <h2 className="section-label">Health</h2>
           {health.loading ? (
             <Loading />
           ) : health.error ? (
@@ -42,7 +42,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="card">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">Agents</h2>
+          <h2 className="section-label">Agents</h2>
           {status.data ? (
             <p className="mt-2 font-mono text-3xl font-semibold text-accent">
               {status.data.agent_count}
@@ -56,7 +56,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="card">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">Trading mode</h2>
+          <h2 className="section-label">Trading mode</h2>
           <p className="mt-2 font-mono text-lg font-semibold">{status.data?.trading_mode ?? "—"}</p>
           <p className="mt-1 text-xs text-danger">live execution not implemented</p>
         </div>
@@ -64,7 +64,7 @@ export default function DashboardPage() {
 
       <section className="mt-8">
         <div className="flex items-center justify-between">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted">최근 감사 로그</h2>
+          <h2 className="section-label">최근 감사 로그</h2>
           <Link href="/system" className="text-xs text-muted hover:text-accent">
             전체 →
           </Link>
