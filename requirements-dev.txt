@@ -1,0 +1,9 @@
+# KOSPI-WATCHER — local development dependencies.
+# Installs the core set, the editable package, and the test/lint/typecheck toolchain.
+-r requirements.txt
+-e .
+pytest>=8.3
+pytest-asyncio>=0.25
+ruff>=0.8
+mypy>=1.14
+types-pyyaml>=6.0

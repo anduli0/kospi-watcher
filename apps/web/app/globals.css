@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Clean dark financial-dashboard palette (HSL channels for <alpha-value>) */
+    --background: 222 47% 6%;
+    --surface: 222 40% 9%;
+    --elevated: 222 34% 13%;
+    --border: 222 22% 20%;
+    --muted: 215 18% 58%;
+    --foreground: 210 40% 96%;
+    --accent: 158 64% 42%;
+    --danger: 0 72% 56%;
+    --warning: 38 92% 55%;
+    /* In Korea, up = red, down = blue (intentional, see RUNBOOK) */
+    --up: 0 72% 56%;
+    --down: 211 86% 60%;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-lg border border-border bg-surface p-5;
+  }
+  .kbd {
+    @apply rounded border border-border bg-elevated px-1.5 py-0.5 font-mono text-xs text-muted;
+  }
+}

@@ -1,0 +1,17 @@
+# KOSPI-WATCHER — core runtime dependencies (local + CI set).
+# asyncpg is intentionally NOT here; it is prod-only (see requirements-prod.txt / ADR-012).
+# Lower-bound pins, validated on Python 3.14 / Windows 11.
+fastapi>=0.115
+uvicorn>=0.34
+pydantic>=2.10
+pydantic-settings>=2.7
+sqlalchemy>=2.0.36
+aiosqlite>=0.20
+alembic>=1.14
+httpx>=0.28
+apscheduler>=3.11,<4
+redis>=5.2
+fakeredis>=2.26
+structlog>=24.4
+pyyaml>=6.0
+tzdata>=2024.2

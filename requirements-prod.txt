@@ -1,0 +1,5 @@
+# KOSPI-WATCHER — production-only dependencies.
+# asyncpg ships C extensions and may lack wheels on bleeding-edge interpreters,
+# so it is never force-installed locally. Prod/Docker uses Postgres via asyncpg.
+-r requirements.txt
+asyncpg>=0.30

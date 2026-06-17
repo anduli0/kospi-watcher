@@ -1,0 +1,31 @@
+# KOSPI-WATCHER risk limits (deny-by-default).
+#
+# Empty allow-lists mean "deny everything". Only instruments and strategies
+# listed here can ever be approved by the Risk Engine. Changes to this file are
+# safety-relevant and must be recorded (ADR or change log) per CLAUDE.md.
+#
+# Monetary values are strings to preserve Decimal precision (KRW). float forbidden.
+
+version: 1
+
+# Only KOSPI200-linked ETFs are tradable in this phase (mock).
+allowed_instruments:
+  - "069500"   # KODEX 200
+  - "102110"   # TIGER 200
+allowed_strategies:
+  - "baseline-momentum-v0"
+  - "mean-reversion-v0"
+
+# Market is treated CLOSED by default; callers must explicitly open it.
+market_open: false
+
+max_order_notional: "50000000"      # 50,000,000 KRW per order
+max_order_quantity: 100000          # shares/units per order
+max_position_notional: "100000000"  # 100,000,000 KRW per instrument
+max_gross_exposure: "300000000"     # 300,000,000 KRW total
+price_deviation_pct: "5"            # reject if limit price deviates >5% from last
+daily_loss_limit: "5000000"         # 5,000,000 KRW realized loss/day
+max_drawdown_pct: "10"
+daily_trade_count: 50
+max_open_orders: 20
+slippage_limit_pct: "1"

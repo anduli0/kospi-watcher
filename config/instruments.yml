@@ -1,0 +1,36 @@
+# KOSPI-WATCHER instrument universe (mock seed data).
+# Used to seed the `instruments` table. Tradable ETFs must also appear in
+# risk_limits.yml `allowed_instruments` (deny-by-default).
+
+version: 1
+instruments:
+  - symbol: "KOSPI"
+    name: "KOSPI Composite Index"
+    instrument_type: "INDEX"
+    market: "KOSPI"
+    tradable: false
+  - symbol: "KOSPI200"
+    name: "KOSPI 200 Index"
+    instrument_type: "INDEX"
+    market: "KOSPI200"
+    tradable: false
+  - symbol: "KOSDAQ"
+    name: "KOSDAQ Composite Index"
+    instrument_type: "INDEX"
+    market: "KOSDAQ"
+    tradable: false
+  - symbol: "069500"
+    name: "KODEX 200"
+    instrument_type: "ETF"
+    market: "KOSPI200"
+    tradable: true
+  - symbol: "102110"
+    name: "TIGER 200"
+    instrument_type: "ETF"
+    market: "KOSPI200"
+    tradable: true
+  - symbol: "229200"
+    name: "KODEX KOSDAQ150"
+    instrument_type: "ETF"
+    market: "KOSDAQ"
+    tradable: false

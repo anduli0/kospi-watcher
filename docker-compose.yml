@@ -1,0 +1,109 @@
+# KOSPI-WATCHER container stack (Postgres + Redis + the four Python services +
+# the Next.js web app). This models the PROD-shaped deployment: asyncpg against
+# Postgres and a real Redis, instead of the dockerless SQLite/fakeredis local mode.
+#
+# !!! NOT VERIFIED: `docker compose up` has NOT been run in this environment
+# (no Docker daemon available). Image builds and service wiring are provided for
+# review and CI/CD, but have not been executed end-to-end. Treat as a draft until
+# someone runs it on a host with Docker.
+#
+# Bring up:   docker compose up --build
+# Safety:     live trading stays disabled — the mandated env defaults are kept.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: kospi
+      POSTGRES_PASSWORD: kospi_local_only
+      POSTGRES_DB: kospi_watcher
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kospi -d kospi_watcher"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://kospi:kospi_local_only@postgres:5432/kospi_watcher
+      REDIS_URL: redis://redis:6379/0
+      TRADING_MODE: RESEARCH
+      LIVE_TRADING_ENABLED: "false"
+      AUTO_EXECUTION_ENABLED: "false"
+      CORS_ALLOW_ORIGINS: '["http://localhost:3000"]'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    # Apply migrations (the async URL is rewritten to psycopg-free asyncpg by
+    # Alembic's env.py) before serving.
+    command: >-
+      sh -c "alembic upgrade head &&
+             python -m uvicorn main:app --app-dir apps/api --host 0.0.0.0 --port 8000"
+
+  agent-service:
+    build:
+      context: .
+      dockerfile: apps/agent-service/Dockerfile
+    environment:
+      TRADING_MODE: RESEARCH
+    ports:
+      - "8001:8001"
+
+  execution-gateway:
+    build:
+      context: .
+      dockerfile: apps/execution-gateway/Dockerfile
+    environment:
+      TRADING_MODE: RESEARCH
+      LIVE_TRADING_ENABLED: "false"
+    ports:
+      - "8002:8002"
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://kospi:kospi_local_only@postgres:5432/kospi_watcher
+      REDIS_URL: redis://redis:6379/0
+      TRADING_MODE: RESEARCH
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: apps/web
+      dockerfile: Dockerfile
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:
