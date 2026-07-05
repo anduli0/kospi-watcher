@@ -40,3 +40,14 @@ Thumbs.db
 
 # --- Build kickoff instruction (not project code) ---
 _KICKOFF.md
+
+# public prod build output (deploy/public-url)
+.next-public/
+apps/web/.next-public/
+
+# local cloudflared binary + tunnel logs (deploy/public-url)
+scripts/bin/
+scripts/*.log
+
+apps/web/dev-server.log
+scripts/current-url.txt

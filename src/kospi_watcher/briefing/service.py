@@ -17,9 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kospi_watcher.agent_service.prediction import PredictionService
 from kospi_watcher.db import repositories
 from kospi_watcher.domain.enums import MarketDirection
+from kospi_watcher.domain.market_calendar import closed_reason
 from kospi_watcher.domain.news_brief import NewsBrief
 from kospi_watcher.domain.prediction.regime import REGIME_KO
 from kospi_watcher.domain.prediction.schemas import MarketPrediction
+from kospi_watcher.domain.time import to_kst
 from kospi_watcher.infrastructure.telegram import send_telegram_message
 from kospi_watcher.newsfeed.service import NewsService
 
@@ -61,9 +63,17 @@ def format_report_message(p: MarketPrediction) -> str:
         return _STANCE_KO.get(s.label.value, s.label.value) if s else "-"
 
     chief = p.deliberation.chief.note if p.deliberation else ""
-    date_str = p.as_of.date().isoformat()
+    as_of_kst = to_kst(p.as_of).date()
+    date_str = as_of_kst.isoformat()
+    # On a non-trading day, label this as a next-session forecast so "방향: 강세"
+    # is never read as "the market rose today".
+    reason = closed_reason(as_of_kst)
+    closed_line = (
+        f"🔕 오늘({date_str})은 {reason} — 아래는 다음 개장일 전망입니다.\n" if reason else ""
+    )
     return (
         f"📈 <b>KOSPI 예측 리포트</b> · {date_str}\n"
+        f"{closed_line}"
         f"대상: {_esc(p.subject)} · 기간: {_esc(p.horizon_label)}\n"
         f"방향: <b>{_DIR_KO[p.direction]}</b> · 확신 {p.confidence:.0%} · "
         f"{_esc(REGIME_KO.get(p.regime, p.regime.value))}\n"
@@ -77,12 +87,24 @@ def format_report_message(p: MarketPrediction) -> str:
 
 
 def format_brief_message(b: NewsBrief) -> str:
-    lines = [f"📰 <b>뉴스 데일리 브리프</b> · {b.date}", "", _esc(b.summary), ""]
-    for theme in b.themes[:4]:
+    header = f"📰 <b>뉴스 데일리 브리프</b> · {b.date}"
+    if not b.is_trading_day:
+        header += " · 🔕 휴장일"
+    lines = [header, "", _esc(b.summary), ""]
+    if b.key_points:
+        lines.append("<b>📌 주요 뉴스</b>")
+        for kp in b.key_points:
+            lines.append(f"• [{_esc(kp.tag)}] {_esc(kp.title)} <i>({_esc(kp.source)})</i>")
+        lines.append("")
+    for theme in b.themes[:5]:
         lines.append(f"<b>{_esc(theme.topic)}</b> ({theme.count}건)")
-        for h in theme.headlines[:3]:
+        if theme.read:
+            lines.append(f"<i>{_esc(theme.read)}</i>")
+        for h in theme.headlines[:2]:
             lines.append(f"• {_esc(h.title)} <i>({_esc(h.source)})</i>")
         lines.append("")
+    if b.market_read:
+        lines.append(_esc(b.market_read))
     return "\n".join(lines).strip()
 
 

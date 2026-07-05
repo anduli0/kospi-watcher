@@ -104,6 +104,11 @@ export default function NewsPage() {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="section-label">뉴스 데일리 브리프 (뉴스 종합 요약)</h2>
           <div className="flex items-center gap-2">
+            {b && b.is_trading_day === false && (
+              <span className="chip border-amber-400/30 bg-amber-400/10 text-amber-400">
+                🔕 휴장일
+              </span>
+            )}
             <span className="chip border-accent2/30 bg-accent2/10 text-accent2">
               매일 08:00 자동 · 텔레그램
             </span>
@@ -120,10 +125,74 @@ export default function NewsPage() {
           <Loading />
         ) : b ? (
           <>
-            <p className="mt-3 leading-7 text-foreground/90">{b.summary}</p>
-            <p className="mt-2 border-l-2 border-accent/40 pl-3 text-sm text-muted">
+            <p className="mt-3 whitespace-pre-line leading-7 text-foreground/90">{b.summary}</p>
+            <p className="mt-3 border-l-2 border-accent/40 pl-3 text-sm font-medium text-foreground/80">
               {b.market_read}
             </p>
+
+            {b.key_points && b.key_points.length > 0 && (
+              <div className="mt-4 border-t border-border/60 pt-4">
+                <p className="section-label">📌 주요 뉴스</p>
+                <ul className="mt-2 space-y-2">
+                  {b.key_points.map((kp) => (
+                    <li key={kp.url}>
+                      <a
+                        href={kp.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm leading-snug"
+                        title={kp.title}
+                      >
+                        <span className="chip shrink-0 border-accent2/30 bg-accent2/10 text-[10px] text-accent2">
+                          {kp.tag}
+                        </span>
+                        <span className="text-foreground/85 group-hover:text-accent group-hover:underline">
+                          {kp.title}
+                        </span>
+                        <span className="num shrink-0 text-[11px] text-muted">{kp.source}</span>
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {b.themes.length > 0 && (
+              <div className="mt-4 border-t border-border/60 pt-4">
+                <p className="section-label">부문별 뉴스</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {b.themes.map((t) => (
+                    <div
+                      key={t.topic}
+                      className="rounded-xl border border-border/60 bg-elevated/40 p-3"
+                    >
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="text-sm font-semibold text-accent2">{t.topic}</span>
+                        <span className="num text-xs text-muted">{t.count}건</span>
+                      </div>
+                      {t.read && (
+                        <p className="mt-1 text-[11px] leading-snug text-muted">{t.read}</p>
+                      )}
+                      <ul className="mt-2 space-y-1.5">
+                        {t.headlines.slice(0, 6).map((h) => (
+                          <li key={h.url}>
+                            <a
+                              href={h.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="block truncate text-xs text-foreground/80 hover:text-accent"
+                              title={h.title}
+                            >
+                              · {h.title}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <p className="mt-3 text-sm text-muted">

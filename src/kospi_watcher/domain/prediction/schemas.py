@@ -12,6 +12,9 @@ from kospi_watcher.domain.enums import (
     MarketRegime,
     StanceLabel,
 )
+from kospi_watcher.domain.prediction.accuracy_track import Calibration
+from kospi_watcher.domain.prediction.monetary_policy import MonetaryPolicySignal
+from kospi_watcher.domain.prediction.trend_signal import TrendSignal
 
 PREDICTION_SCHEMA_VERSION = "1.0.0"
 
@@ -120,9 +123,12 @@ class MarketPrediction(BaseModel):
     brief: str
     desk_views: list[DeskView] = Field(default_factory=list)
     deliberation: Deliberation | None = None
+    monetary_policy: MonetaryPolicySignal | None = None
+    trend_signal: TrendSignal | None = None
+    calibration: Calibration | None = None
     instrument_stances: list[InstrumentStance] = Field(default_factory=list)
     scenarios: list[Scenario] = Field(default_factory=list)
     news_refs: list[str] = Field(default_factory=list)
-    generated_by: str  # "mock" | "llm"
+    generated_by: str  # "mock" | "llm" | "claude_cli"
     agent_count: int
     created_at: AwareDatetime

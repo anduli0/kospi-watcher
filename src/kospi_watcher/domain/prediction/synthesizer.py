@@ -27,7 +27,12 @@ from kospi_watcher.domain.enums import (
     MarketDirection,
     MarketRegime,
 )
+from kospi_watcher.domain.prediction.accuracy_track import Calibration
 from kospi_watcher.domain.prediction.instruments import PREDICTION_UNIVERSE, stance_for
+from kospi_watcher.domain.prediction.monetary_policy import (
+    MonetaryPolicySignal,
+    PolicyStance,
+)
 from kospi_watcher.domain.prediction.regime import REGIME_KO, classify_regime
 from kospi_watcher.domain.prediction.schemas import (
     AgentPosition,
@@ -39,6 +44,7 @@ from kospi_watcher.domain.prediction.schemas import (
     MarketPrediction,
     Scenario,
 )
+from kospi_watcher.domain.prediction.trend_signal import TrendSignal
 from kospi_watcher.domain.time import now_utc
 
 _SUBJECT = "코스피200 지수 방향 (KODEX 200 추종 기준)"
@@ -65,6 +71,31 @@ _DIR_KO: dict[MarketDirection, str] = {
     MarketDirection.BULLISH: "강세",
     MarketDirection.BEARISH: "약세",
     MarketDirection.NEUTRAL: "중립",
+}
+
+# Plain-language gloss of the direction for prose (avoids bare jargon).
+_DIR_GLOSS: dict[MarketDirection, str] = {
+    MarketDirection.BULLISH: "상승(강세)",
+    MarketDirection.BEARISH: "하락(약세)",
+    MarketDirection.NEUTRAL: "뚜렷한 방향성 부재(중립)",
+}
+_FORWARD_KO: dict[MarketDirection, str] = {
+    MarketDirection.BULLISH: "오를 가능성",
+    MarketDirection.BEARISH: "내릴 가능성",
+    MarketDirection.NEUTRAL: "뚜렷한 방향 없이 등락을 반복할 가능성",
+}
+
+# Plain, readable description of each market phase (kept out of jargon territory).
+_REGIME_PHRASE: dict[MarketRegime, str] = {
+    MarketRegime.RISK_ON_STRONG: "위험자산 선호가 뚜렷한",
+    MarketRegime.RISK_ON_FRAGILE: "위험자산을 선호하나 변동성이 큰",
+    MarketRegime.LIQUIDITY_RALLY: "유동성에 기댄 상승",
+    MarketRegime.EARNINGS_RALLY: "실적 기대가 이끄는 상승",
+    MarketRegime.SIDEWAYS_LOW_VOL: "큰 변동 없이 방향을 탐색하는",
+    MarketRegime.SIDEWAYS_HIGH_VOL: "변동성이 큰 채 방향이 엇갈리는",
+    MarketRegime.RISK_OFF: "위험을 줄이려는 방어적인",
+    MarketRegime.CRISIS: "위기 경계가 높은",
+    MarketRegime.DATA_UNCERTAIN: "데이터가 불확실한",
 }
 
 
@@ -140,8 +171,8 @@ def _scenarios(direction: MarketDirection, confidence: float) -> list[Scenario]:
         Scenario(
             name=f"기본 — {dir_ko} 지속",
             probability=ps[0],
-            thesis=f"하우스 뷰({dir_ko})가 horizon 내 유지된다.",
-            triggers=["주도 데스크 신호 지속", "수급/거시 환경 불변"],
+            thesis=f"이번 전망({dir_ko})이 전망 기간 내 유지된다.",
+            triggers=["주도 데스크 신호 지속", "수급·거시 환경 불변"],
         ),
         Scenario(
             name=f"반전 — {rev_ko}",
@@ -238,6 +269,9 @@ def synthesize(
     generated_by: str = "mock",
     agent_count: int = 21,
     news_headlines: Sequence[str] | None = None,
+    monetary_policy: MonetaryPolicySignal | None = None,
+    trend_signal: TrendSignal | None = None,
+    calibration: Calibration | None = None,
 ) -> MarketPrediction:
     as_of = as_of or now_utc()
     by_agent: dict[str, AgentFinding] = {}
@@ -248,8 +282,16 @@ def synthesize(
     view_by_desk = {Desk(v.desk): v for v in desk_views}
 
     overall_score = sum(v.weight * v.score for v in desk_views)
+    # The real price trend is the PRIMARY directional anchor (the prediction must
+    # not fight the market), and BOK monetary policy is a core risk tilt on top of
+    # it (ADR-025 / ADR-024). Both adjust the desk-weighted score at the Chief level.
+    overall_score += _trend_tilt(trend_signal) + _policy_tilt(monetary_policy)
+    # Auto-feedback: the calibration learned from scoring past predictions nudges
+    # the direction toward the realized drift (ADR-027).
+    if calibration is not None:
+        overall_score += calibration.direction_bias
     direction = _lean(overall_score, _OVERALL_THR)
-    confidence = round(min(0.95, 0.40 + abs(overall_score) * 0.8), 2)
+    confidence = _confidence(overall_score, direction, trend_signal, calibration)
 
     vol = by_agent.get("Volatility and Regime Agent")
     vol_high = vol is not None and vol.impact is Impact.HIGH
@@ -288,7 +330,18 @@ def synthesize(
     scenarios = _scenarios(direction, confidence)
     news_refs = [h for h in (news_headlines or []) if h][:5]
     headline = _headline(direction, confidence, regime)
-    brief = _brief(direction, confidence, regime, view_by_desk, top_desk, stances, news_refs)
+    brief = _brief(
+        direction,
+        confidence,
+        regime,
+        view_by_desk,
+        top_desk,
+        stances,
+        news_refs,
+        trend_signal,
+        monetary_policy,
+        scenarios,
+    )
 
     analysis_desks = [d for d in AGENT_ORG if d.key is not Desk.CHIEF]
     deliberation = Deliberation(
@@ -312,12 +365,94 @@ def synthesize(
         brief=brief,
         desk_views=desk_views,
         deliberation=deliberation,
+        monetary_policy=monetary_policy,
+        trend_signal=trend_signal,
+        calibration=calibration,
         instrument_stances=stances,
         scenarios=scenarios,
         news_refs=news_refs,
         generated_by=generated_by,
         agent_count=agent_count,
         created_at=now_utc(),
+    )
+
+
+def _trend_clause(ts: TrendSignal) -> str:
+    dir_ko = _DIR_KO[ts.direction]
+    return (
+        f"가격 추세가 100일 평균선과 최근 60일 흐름 기준으로 {dir_ko}이며"
+        f"(추세 강도 {ts.strength:.0%}), 이번 판단을 시장의 실제 흐름에 맞췄다는 점이 가장 큽니다"
+    )
+
+
+def _confidence(
+    overall_score: float,
+    direction: MarketDirection,
+    trend_signal: TrendSignal | None,
+    calibration: Calibration | None,
+) -> float:
+    """Confidence from net signal agreement + the dominant trend's conviction,
+    then anchored to the realized directional reliability (ADR-027).
+
+    A clear, strongly-trending, empirically-reliable call should NOT read like a
+    coin flip: the floor and slope are raised, an unambiguous aligned trend adds a
+    conviction bonus, and the calibration pulls confidence toward the realized hit
+    rate (e.g. ~0.7) rather than scaling it down."""
+    conf = 0.42 + abs(overall_score) * 0.9
+    if (
+        trend_signal is not None
+        and trend_signal.direction is direction
+        and direction is not MarketDirection.NEUTRAL
+    ):
+        conf += 0.12 * trend_signal.strength  # strong aligned trend = real conviction
+    conf = min(0.95, conf)
+    # Reliability anchor: blend toward the realized hit rate for a clear call.
+    if (
+        calibration is not None
+        and calibration.confidence_target >= 0.5
+        and direction is not MarketDirection.NEUTRAL
+    ):
+        conf = 0.6 * conf + 0.4 * calibration.confidence_target
+    return round(min(0.95, conf), 2)
+
+
+def _trend_tilt(ts: TrendSignal | None) -> float:
+    """Signed house-level anchor to the real price trend (bull > 0, bear < 0).
+
+    This is the PRIMARY directional driver — stronger than the policy tilt — so the
+    house view tracks the actual market and doesn't fight a strong trend."""
+    if ts is None or ts.direction is MarketDirection.NEUTRAL:
+        return 0.0
+    magnitude = min(0.35, 0.10 + ts.strength * 0.30)
+    return _DIR_SIGN[ts.direction] * magnitude
+
+
+def _policy_tilt(mp: MonetaryPolicySignal | None) -> float:
+    """Signed house-level tilt from BOK policy (hawkish < 0, dovish > 0).
+
+    BOK is a *core* driver: a confident hawkish/dovish read is strong enough to
+    set the house direction even against the desk base. Confidence-weighted, with
+    a small additional kick per expected hike, capped so it can't fully saturate.
+    """
+    if mp is None or mp.stance is PolicyStance.NEUTRAL:
+        return 0.0
+    magnitude = min(0.30, mp.confidence * (0.14 + 0.04 * abs(mp.expected_hikes_2026)))
+    return _DIR_SIGN[mp.equity_bias] * magnitude
+
+
+def _policy_clause(mp: MonetaryPolicySignal) -> str:
+    stance_ko = {
+        PolicyStance.HAWKISH: "매파(긴축)",
+        PolicyStance.DOVISH: "비둘기(완화)",
+        PolicyStance.NEUTRAL: "중립",
+    }[mp.stance]
+    n = abs(mp.expected_hikes_2026)
+    move = "인상" if mp.stance is PolicyStance.HAWKISH else "인하"
+    path = f" 2026년 약 {n}회 {move} 전망," if n else ""
+    bias_ko = _DIR_KO[mp.equity_bias]
+    return (
+        f"한국은행 통화정책은 {stance_ko} 기조로,{path} 코스피에 {bias_ko} 압력으로 "
+        f"작용한다는 점도 핵심 거시 변수로 반영했습니다."
     )
 
 
@@ -347,8 +482,13 @@ def _brief(
     top_desk: Desk,
     stances: list[InstrumentStance],
     news_refs: list[str],
+    trend_signal: TrendSignal | None,
+    monetary_policy: MonetaryPolicySignal | None,
+    scenarios: list[Scenario],
 ) -> str:
-    dir_ko = _DIR_KO[direction]
+    """A structured, analyst-style note: 총평 → 핵심 동인 → 리스크 → 대응 전략 →
+    지켜볼 변수. Plain Korean, professional but readable, written to actually help a
+    decision. Paragraphs are separated by blank lines (rendered with `pre-line`)."""
     lead = view_by_desk[top_desk]
     risk = view_by_desk[Desk.RISK]
     by_symbol = {s.symbol: s for s in stances}
@@ -356,27 +496,80 @@ def _brief(
     inv_ko = _stance_ko(by_symbol["114800"].label.value)
     inv2_ko = _stance_ko(by_symbol["252670"].label.value)
     lead_driver = lead.top_drivers[0] if lead.top_drivers else "주도 신호"
-    risk_driver = risk.top_drivers[0] if risk.top_drivers else "꼬리위험"
+    risk_driver = risk.top_drivers[0] if risk.top_drivers else "예상 밖 꼬리 위험"
 
+    # 1) 총평 — the one-glance read (carries the subject label).
+    overview = (
+        f"【총평】 {_SUBJECT}에 대한 오늘의 종합 판단은 '{_DIR_GLOSS[direction]}'입니다. "
+        f"분석 에이전트 21인이 5개 데스크로 나눠 검토하고 수석이 최종 조율한 결과로, "
+        f"확신도는 {confidence:.0%}({_conv_ko(confidence)})이며 지금 장세는 "
+        f"{_REGIME_PHRASE.get(regime, REGIME_KO[regime])} 국면으로 읽힙니다. "
+        f"한마디로, 코스피는 단기적으로 {_FORWARD_KO[direction]}에 무게가 실립니다."
+    )
+
+    # 2) 핵심 동인 — why, in plain language (trend anchor → lead desk → policy → news).
+    drivers: list[str] = []
+    if trend_signal is not None and trend_signal.direction is not MarketDirection.NEUTRAL:
+        drivers.append(f"무엇보다 {_trend_clause(trend_signal)}.")
+    drivers.append(
+        f"분석에서는 {lead.title}가 {_DIR_KO[lead.lean]} 신호를 주도했는데, "
+        f"'{lead_driver}'가 핵심 논거입니다."
+    )
+    if monetary_policy is not None and monetary_policy.stance is not PolicyStance.NEUTRAL:
+        drivers.append(_policy_clause(monetary_policy))
+    else:
+        drivers.append("금리·수급 등 거시 환경은 큰 변수 없이 중립적으로 반영했습니다.")
+    if news_refs:
+        drivers.append(
+            f"여기에 최근 '{_trim(news_refs[0], 60)}' 등 뉴스 흐름도 같은 맥락으로 더해졌습니다."
+        )
+    movers = "【핵심 동인】 이렇게 본 근거는 다음과 같습니다. " + " ".join(drivers)
+
+    # 3) 리스크 점검 — the other side, with the reversal odds + what would flip it.
     invalidation = {
-        MarketDirection.BULLISH: "외국인 수급 전환이나 변동성 급등 시 인버스로의 헤지 전환을 검토",
-        MarketDirection.BEARISH: "낙폭과대에 따른 기술적 반등 위험은 경계",
-        MarketDirection.NEUTRAL: "방향 확정 전까지 레버리지 상품은 회피",
+        MarketDirection.BULLISH: (
+            "외국인 매도 전환이나 변동성 급등이 나타나면 인버스로 방어 전환을 검토해야"
+        ),
+        MarketDirection.BEARISH: "낙폭이 과도해진 뒤의 기술적 반등 위험은 경계해야",
+        MarketDirection.NEUTRAL: "방향이 확인되기 전까지 레버리지·인버스 모두 자제해야",
     }[direction]
-
-    news_clause = (
-        f" 최근 '{_trim(news_refs[0], 50)}' 등 뉴스 흐름도 함께 반영했다."
-        if news_refs
+    reversal = scenarios[1] if len(scenarios) > 1 else None
+    rev_clause = (
+        f"시나리오상 '{reversal.name}'이 약 {reversal.probability:.0%} 확률로 열려 있으며, "
+        if reversal
         else ""
     )
-
-    return (
-        f"[예측 대상: {_SUBJECT}] 오늘 코스피는 {REGIME_KO[regime]} 국면으로 판단된다. "
-        f"21개 분석 에이전트를 5개 데스크로 계층 종합(데스크 토의→수석 조율)한 하우스 뷰는 "
-        f"{dir_ko}이며 확신도는 {confidence:.0%}다.{news_clause} "
-        f"{lead.title}가 {_DIR_KO[lead.lean]} 신호를 주도했고({lead_driver}), "
-        f"이는 종합 방향성의 핵심 근거가 됐다. 다만 {risk.title}는 {_DIR_KO[risk.lean]} 시각에서 "
-        f"{risk_driver}을(를) 경고하며, {invalidation}한다. "
-        f"포지셔닝은 KODEX 200·레버리지 {long_ko}, 인버스 {inv_ko}, "
-        f"곱버스(200선물인버스2X) {inv2_ko}로 제시한다."
+    risks = (
+        f"【리스크 점검】 반대 시각도 함께 봅니다. {risk.title}는 {_DIR_KO[risk.lean]} 관점에서 "
+        f"'{risk_driver}'을(를) 경고합니다. {rev_clause}{invalidation} 합니다."
     )
+
+    # 4) 대응 전략 — concrete positioning + a decay caution (carries '곱버스').
+    action = {
+        MarketDirection.BULLISH: (
+            "오를 가능성에 무게가 실리는 만큼 지수형을 중심에 두되, "
+            "단기 급등 구간에서는 한 번에 사기보다 나눠 접근하는 편이 안전합니다."
+        ),
+        MarketDirection.BEARISH: (
+            "비중을 줄여 방어적으로 가져가되, 기술적 반등 위험이 있으니 "
+            "인버스는 전량이 아니라 일부만 활용하는 편이 낫습니다."
+        ),
+        MarketDirection.NEUTRAL: (
+            "한쪽으로 베팅하기보다 비중을 낮추고 관망하다가, "
+            "방향이 잡힌 뒤에 대응하는 것이 유리합니다."
+        ),
+    }[direction]
+    strategy = (
+        f"【대응 전략】 지수형(KODEX 200)·레버리지는 {long_ko}, 인버스는 {inv_ko}, "
+        f"곱버스(2배 인버스)는 {inv2_ko}로 제시합니다. {action} "
+        "특히 레버리지·곱버스는 매일 재조정에서 생기는 손실이 쌓여 오래 들고 갈수록 "
+        "불리하니, 길게 보유하기보다 짧게 대응하는 것이 원칙입니다."
+    )
+
+    # 5) 지켜볼 변수 — concrete checkpoints to monitor next.
+    watch = (
+        "【지켜볼 변수】 앞으로는 외국인·기관 수급의 방향, 코스피 변동성지수의 급변, "
+        f"환율·금리 관련 일정, 그리고 {lead.title}의 신호 지속 여부를 함께 점검하시기 바랍니다."
+    )
+
+    return "\n\n".join([overview, movers, risks, strategy, watch])

@@ -10,7 +10,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from kospi_watcher.agent_service.accuracy_service import get_accuracy_service
+from kospi_watcher.agent_service.backtest_service import get_backtest_service
+from kospi_watcher.agent_service.instrument_analysis import InstrumentAnalysisService
 from kospi_watcher.agent_service.prediction import PredictionService
+from kospi_watcher.agent_service.stock_service import get_stock_recommendation_service
 from kospi_watcher.api.deps import SessionDep
 from kospi_watcher.api.schemas.requests import MockRunRequest
 from kospi_watcher.api.schemas.responses import (
@@ -23,10 +27,15 @@ from kospi_watcher.db import repositories
 from kospi_watcher.db.repositories import add_audit_log, save_prediction
 from kospi_watcher.domain.agents.org import AGENT_ORG, Tier
 from kospi_watcher.domain.enums import AuditAction
+from kospi_watcher.domain.prediction.accuracy_track import AccuracyTrackReport
+from kospi_watcher.domain.prediction.backtest import BacktestReport
+from kospi_watcher.domain.prediction.instrument_outlook import InstrumentAnalysisReport
 from kospi_watcher.domain.prediction.schemas import MarketPrediction
+from kospi_watcher.domain.stocks import StockRecommendationReport
 
 router = APIRouter(tags=["prediction"])
 _service = PredictionService()
+_analysis_service = InstrumentAnalysisService()
 
 
 @router.post("/prediction/run", response_model=MarketPrediction)
@@ -88,6 +97,35 @@ async def daily_brief(session: SessionDep) -> BriefResponse:
             for s in pred.instrument_stances
         ],
     )
+
+
+@router.get("/analysis/instruments", response_model=InstrumentAnalysisReport)
+async def instrument_analysis(session: SessionDep) -> InstrumentAnalysisReport:
+    """Per-instrument verdict (매수/중립/매도) + short/mid/long price outlook for
+    the long/inverse/leveraged ladder, derived from the latest house view."""
+    return await _analysis_service.build(session)
+
+
+@router.get("/stocks/recommendations", response_model=StockRecommendationReport)
+async def stock_recommendations(session: SessionDep) -> StockRecommendationReport:
+    """Short/mid/long-term individual-stock top picks, combining live per-stock
+    momentum with the house view, sector board, BOK policy, and news (ADR-026)."""
+    return await get_stock_recommendation_service().build(session)
+
+
+@router.get("/backtest", response_model=BacktestReport)
+async def backtest(symbol: str = "KOSPI") -> BacktestReport:
+    """Directional-accuracy backtest of the trend signal that anchors the house
+    view: hit rate vs base rate (skill), per horizon, out-of-sample split."""
+    return await get_backtest_service().report(symbol)
+
+
+@router.get("/accuracy/track", response_model=AccuracyTrackReport)
+async def accuracy_track() -> AccuracyTrackReport:
+    """Prediction-vs-actual time series (실제 매수보유 vs 모델 추종 누적수익),
+    directional scorecard, and the auto-feedback calibration applied to future
+    predictions (ADR-027)."""
+    return await get_accuracy_service().report()
 
 
 @router.get("/agents/org", response_model=OrgResponse)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
+from kospi_watcher.agent_service.service import AgentService
 from kospi_watcher.api.schemas.responses import DataSourceStatus, SystemStatusResponse
 from kospi_watcher.config import (
     LIVE_EXECUTION_IMPLEMENTED,
@@ -47,9 +48,6 @@ async def system_status() -> SystemStatusResponse:
             ],
         ],
         agent_count=len(get_registry()),
-        agent_runtime=(
-            "llm"
-            if settings.agent_runtime == "llm" and settings.anthropic_api_key.get_secret_value()
-            else "mock"
-        ),
+        # Single source of truth for runtime arming (mock/llm/claude_cli).
+        agent_runtime=AgentService().runtime_name,
     )

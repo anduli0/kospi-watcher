@@ -1,0 +1,14 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="kospiwatcher" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#29BC86"/>
+      <stop offset="1" stop-color="#35B7F3"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#kospiwatcher)"/>
+  <g stroke="#0A0D14" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M23 16 V48"/>
+    <path d="M23 32 L44 16"/>
+    <path d="M23 32 L44 48"/>
+  </g>
+</svg>

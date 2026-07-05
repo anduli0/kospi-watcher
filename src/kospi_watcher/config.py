@@ -53,11 +53,28 @@ class Settings(BaseSettings):
     # --- Agents ---
     # "mock" = deterministic offline agents; "llm" = real Anthropic-backed
     # agents (only used when ANTHROPIC_API_KEY is set; otherwise falls back to
-    # mock). Default model is the latest Claude; override to a cheaper tier
+    # mock); "claude_cli" = real agents via the local Claude Code CLI on the
+    # user's Claude subscription (token from `claude setup-token`; no API
+    # credits consumed; falls back to mock when the CLI/token is missing).
+    # Default model is the latest Claude; override to a cheaper tier
     # (e.g. claude-sonnet-4-6) for high-volume runs.
     agent_runtime: str = "mock"
     agent_model: str = "claude-opus-4-8"
     agent_max_tokens: int = 2048
+    # claude_cli runtime tuning: model alias/id the CLI runs, how many CLI
+    # processes may run at once, per-call timeout, optional explicit CLI path.
+    agent_cli_model: str = "claude-sonnet-5"
+    agent_cli_concurrency: int = 3
+    agent_cli_timeout_seconds: int = 240
+    claude_cli_path: str = ""
+
+    # --- Site-triggered sync (web 새로고침; guards a public button) ---
+    # Cooldown between full refreshes, staleness threshold for the web's
+    # auto-refresh, and whether a web-triggered sync also pushes Telegram
+    # (default off — the 08:00 worker owns delivery).
+    sync_cooldown_minutes: int = 10
+    sync_stale_hours: int = 6
+    sync_notify_telegram: bool = False
 
     # --- Market data ---
     # "yahoo" = real, keyless quotes (KOSPI/USDKRW/ETFs); "mock" = offline.
@@ -70,8 +87,23 @@ class Settings(BaseSettings):
     news_provider: str = "google"
     news_retention_days: int = 14
     news_topics: list[str] = Field(
-        default_factory=lambda: ["코스피 증시", "코스닥", "원달러 환율", "삼성전자 반도체"]
+        default_factory=lambda: [
+            "코스피 증시",
+            "코스닥",
+            "원달러 환율",
+            "삼성전자 반도체",
+            "한국은행 기준금리",
+            "금융통화위원회",
+        ]
     )
+
+    # --- Monetary policy (BOK) — a core macro driver of the prediction (ADR-024) ---
+    # "auto" = derive hawkish/dovish from BOK news headlines; or set an
+    # authoritative stance: "hawkish" | "neutral" | "dovish".
+    monetary_policy_stance: str = "auto"
+    # Net expected 25bp moves in 2026 (used when the stance is set manually;
+    # positive = hikes, negative = cuts).
+    monetary_policy_hikes_2026: int = 0
     market_data_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"

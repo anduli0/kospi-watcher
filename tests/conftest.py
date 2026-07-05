@@ -29,6 +29,13 @@ os.environ["REDIS_URL"] = ""
 # Offline, deterministic market data + news in tests (no network calls).
 os.environ["MARKET_DATA_PROVIDER"] = "mock"
 os.environ["NEWS_PROVIDER"] = "mock"
+# Force Telegram OFF in tests: empty env vars override any developer `.env`, so the
+# suite tests the unconfigured path AND can never send a real message.
+os.environ["TELEGRAM_BOT_TOKEN"] = ""
+os.environ["TELEGRAM_CHAT_ID"] = ""
+# Force the mock agent runtime: a developer `.env` may arm `llm`/`claude_cli`,
+# and the suite must never spend API credits or subscription quota.
+os.environ["AGENT_RUNTIME"] = "mock"
 for _k in ("LIVE_TRADING_ENABLED", "AUTO_EXECUTION_ENABLED", "TRADING_MODE"):
     os.environ.pop(_k, None)
 

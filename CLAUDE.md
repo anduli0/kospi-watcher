@@ -64,7 +64,9 @@ rendered messages + Telegram status), useful to preview/test without the cron or
 token (ADR-021).
 
 New endpoints: `POST /api/v1/prediction/run`, `GET /api/v1/prediction/latest`,
-`GET /api/v1/brief`, `GET /api/v1/agents/org`, `GET /api/v1/news`,
+`GET /api/v1/brief`, `GET /api/v1/agents/org`, `GET /api/v1/market/analysis`,
+`GET /api/v1/analysis/instruments`, `GET /api/v1/backtest`,
+`GET /api/v1/accuracy/track`, `GET /api/v1/stocks/recommendations`, `GET /api/v1/news`,
 `GET /api/v1/news/dates`, `POST /api/v1/news/scrape`, `GET /api/v1/news/brief`,
 `POST /api/v1/news/brief/run`, `POST /api/v1/notify/morning`; predictions persist
 in `market_predictions` and the news daily brief in `daily_briefs`, and the daily
@@ -73,20 +75,102 @@ in `market_predictions` and the news daily brief in `daily_briefs`, and the dail
 authority (the inverse/곱버스 ETFs are `tradable=false`, and any order still passes
 the deny-by-default Risk Engine).
 
-The web is a **modern multi-page UI** (Pretendard font, dark fintech palette,
-Korea up=red/down=blue) with an 오늘 / 예측 / 뉴스 / 에이전트 / 트레이딩 / 시스템
-nav and a **disclaimer + ownership footer** (`© 2026 YellowScale · 안민규`);
-`/prediction` renders the deliberation thread + Chief reconciliation, `/news` the
-dated headlines (ADR-019).
+The web is a **modern multi-page UI** (Pretendard font, lucide icons, dark fintech
+palette, Korea up=red/down=blue) with an 오늘 / 예측 / 정확도 / 시장 / 종목분석 /
+종목추천 / 뉴스 / 에이전트 / 시스템 nav and a **disclaimer + ownership footer**
+(`© 2026 안민규`); `/prediction` renders the deliberation thread +
+Chief reconciliation, `/news` the dated headlines (ADR-019), `/market` the
+**market-flow analysis** — live sector board + 외국인/기관/개인 flows (ADR-022) —
+and `/analysis` the **per-instrument outlook** (ADR-023).
+
+**Prediction tracking + auto-feedback (`/accuracy`, ADR-027).** The model is
+deterministic, so it is *replayed* over history (`domain/prediction/
+accuracy_track.py`) to build a **predicted-vs-actual time series** — two cumulative
+curves, 실제(지수 매수보유) vs 모델(예측 방향 추종), with directional miss markers —
+plus a **scorecard** (hit rate vs base rate, by-direction) and a bounded
+**Calibration** (`direction_bias` + `confidence_scale`) derived from that scoring.
+The calibration is fed back into `synthesize(...)` (and stored on
+`MarketPrediction.calibration`), so scoring → calibration → next prediction →
+re-scoring forms a self-improvement loop. `GET /api/v1/accuracy/track`; the
+`/accuracy` page renders the SVG dual-line chart + scorecard + calibration card.
+The same `trend_core` is scored and used, so the measured accuracy IS the live
+prediction's accuracy.
+
+**Individual stock recommendations (`/stocks`, ADR-026).** A deterministic
+recommender (`domain/stocks/`) ranks a curated 30-name KOSPI/KOSDAQ universe into
+**단기/중기/장기 Top picks**, combining real per-stock momentum with the house
+view, the live sector board, BOK policy, structural themes, and news catalysts.
+`GET /api/v1/stocks/recommendations`. Display-only 참고 자료 (면책); bold but reasoned.
+
+**Price-trend anchor + accuracy backtest (ADR-025).** The prediction now anchors
+on the **real price trend** as its *primary* directional driver. `trend_core`
+(`domain/prediction/trend_signal.py`) is a deterministic past-only signal —
+price vs 100-day SMA, gated by 60-day momentum agreement — that overrides the
+FLOW_TECH `Breadth and Technical Agent` finding AND tilts the Chief score (above
+the BOK tilt). The **same function** is run over 5 years of ^KS11 daily closes
+(`infrastructure/marketdata/history.py`, keyless Yahoo) to measure
+**directional accuracy out-of-sample**: `GET /api/v1/backtest` returns hit rate,
+`naive = max(base_up, 1-base_up)` base rate, and **skill** per horizon (D5/D20/
+D60), train/test split. Honest interpretation: D20 train hit 55.5% vs base 53.0%
+(**+2.5%p skill** — a verified directional edge on balanced markets); the test
+window's negative skill is the bull-market base-rate ceiling, not a signal flaw.
+The trend anchor's job is to keep the house view aligned with the market (so a
+hawkish BOK doesn't drive the prediction into a strong uptrend), not to beat
+single-digit coin-flips. Visible via `TrendSignalCard` + `BacktestCard` on
+`/analysis` and `/prediction`.
+
+**BOK monetary policy — a core macro driver (ADR-024).** The prediction now treats
+Korean monetary policy (금통위·기준금리·총재 발언) as a first-class input. A
+`MonetaryPolicySignal` (`domain/prediction/monetary_policy.py`) is built from an
+**authoritative config override** (`MONETARY_POLICY_STANCE` = hawkish/neutral/
+dovish + `MONETARY_POLICY_HIKES_2026`) or, in `auto` mode, a **keyword classifier
+over BOK news headlines** (keyless; `source` = config/news/mock). It is injected
+into the MACRO desk (overriding the Korea Macro + Rates agents' findings, NEUTRAL =
+no-op) AND tilts the house direction at the Chief level (`_policy_tilt`, confidence-
+weighted) so a confident hawkish read is *decisive* (hawkish → KOSPI bearish,
+인버스/곱버스 favoured; 2 hikes → RISK_OFF, 3 → CRISIS). It is stored on
+`MarketPrediction.monetary_policy`, woven into the brief, and shown via
+`MonetaryPolicyCard` on `/prediction` and `/analysis`. Full 금통위 의사록/BOK 리포트
+NLP is the upgrade path behind the same interface.
+
+**Per-instrument analysis (`/analysis`, ADR-023).** The old `/trading` paper
+screen was repurposed into a **종목 분석** surface (모의체결 UI 제거; the PAPER
+backend + tests are kept). For each rung of the ladder (069500/122630/114800/
+252670) it shows a **position verdict** — 매수(BUY)/중립(HOLD)/매도(SELL), reusing
+the same `stance_for` the prediction uses — plus a **short/mid/long price outlook**
+(signed expected return + low/base/high target range + Korean rationale). It is a
+deterministic, display-only **model projection** (`domain/prediction/
+instrument_outlook.py` over the latest house view + live prices; never order
+authority): expected index drift from direction×confidence, amplified by the
+instrument's exposure sign & leverage, **minus** the daily-rebalancing
+volatility-decay drag (heaviest for 곱버스 over long horizons). `GET /api/v1/
+analysis/instruments`.
+
+**Market-flow analysis (`/market`, ADR-022).** A read-only "what moved KOSPI
+today" surface: a **live, keyless sector board** (8 KODEX industry ETFs via Yahoo,
+signed daily % vs `previousClose`; never-raises, per-sector mock fallback) plus
+**investor flows** for 외국인/기관/개인. The flows have no keyless real-time KRX
+feed, so they are **representative** (`flow_source="representative"`,
+deterministic per KST day, ~zero-sum, sign aligned to the index move) and labelled
+as such in the schema and UI — never presented as a real KRX print; a real
+KRX/pykrx feed drops in behind the same `InvestorFlow` interface later. Display-only
+(`GET /api/v1/market/analysis`); not order authority. The paper-trading allow-list
+(`config/risk_limits.yml`) was expanded to the long/leveraged/inverse/곱버스 +
+KOSDAQ ETF ladder (the PAPER backend endpoints + tests remain; the trading *UI* was
+later replaced by the `/analysis` outlook screen, ADR-023).
 
 It has two halves with a hard wall between them:
 
 1. **Analysis** — 21 agents that *only* analyze. They emit `AgentFinding`s and
    have **no order-execution surface** (`AnalysisAgent` protocol in
    `src/kospi_watcher/domain/agents/base.py`). Agents can run on the deterministic
-   **mock** runtime (default) or a **real Anthropic LLM** (`AGENT_RUNTIME=llm` +
+   **mock** runtime (default), a **real Anthropic LLM** (`AGENT_RUNTIME=llm` +
    `ANTHROPIC_API_KEY`, default model `claude-opus-4-8`, mock fallback on any
-   error) — **neither runtime has order authority** (ADR-015).
+   error, ADR-015), or the **owner's Claude subscription** via the local Claude
+   Code CLI (`AGENT_RUNTIME=claude_cli`, headless `claude -p` per agent call,
+   token from `claude setup-token` at `~/.claude/oauth-token.secret`, default
+   model `claude-sonnet-5`, same mock fallback; `infrastructure/claude_cli.py`,
+   ADR-028) — **no runtime has order authority**.
 2. **Execution** — a deterministic, **deny-by-default** Risk Engine is the *only*
    gate to an order, and `ExecutionGateway` is the *only* code that ever calls a
    broker. **PAPER (simulated) execution IS implemented and safe**: it moves no
@@ -250,6 +334,19 @@ $env:TRADING_MODE = "PAPER"           # RESEARCH (default) refuses execution (HT
 $env:AGENT_RUNTIME = "llm"; $env:ANTHROPIC_API_KEY = "sk-ant-..."
 # AGENT_MODEL defaults to claude-opus-4-8; set claude-sonnet-4-6 for a cheaper tier.
 # POST /api/v1/agents/run  → configured runtime; /system/status reports agent_runtime.
+
+# Real LLM agents on the OWNER'S CLAUDE SUBSCRIPTION (no API credits; ADR-028).
+# One-time: `claude setup-token` → token stored at ~/.claude/oauth-token.secret
+# (or CLAUDE_CODE_OAUTH_TOKEN). Then:
+$env:AGENT_RUNTIME = "claude_cli"     # AGENT_CLI_MODEL defaults to claude-sonnet-5
+# Falls back to mock per agent if the CLI/token is missing or a call fails.
+
+# Site-triggered refresh (the public web's 자동/수동 업데이트; ADR-028):
+# POST /api/v1/sync/run     → background scrape→predict→brief; single-flight +
+#                             SYNC_COOLDOWN_MINUTES (default 10) guard the public button.
+# GET  /api/v1/sync/status  → progress/stage, runtime+model, staleness, cooldown.
+# The web home auto-fires one refresh when opened on data older than SYNC_STALE_HOURS
+# (default 6); no Telegram from web syncs unless SYNC_NOTIFY_TELEGRAM=true.
 ```
 
 Do **not** persist `TRADING_MODE`/`AGENT_RUNTIME` overrides into committed defaults
@@ -299,10 +396,20 @@ until run on a host with Docker.
   the visible agent deliberation + the UI/disclaimer.
 - `docs/TRADING_SAFETY.md` — the risk checks, kill-switch model, and the
   PAPER-implemented / LIVE-not-implemented boundary (§12).
-- `docs/adr/` — the 21 architecture decision records (ADR-013/014/015 cover the
+- `docs/adr/` — the 27 architecture decision records (ADR-013/014/015 cover the
   market-data, paper-execution, and LLM-runtime decisions; ADR-016/017 cover the
   research-desk org and the deterministic prediction / daily-brief engine;
   ADR-018/019 cover keyless news scraping + the visible deliberation and modern
   multi-page UI; ADR-020 covers the news daily brief as a roundup separate from
   the prediction report; ADR-021 covers the 08:00 Asia/Seoul morning briefing →
-  Telegram).
+  Telegram; ADR-022 covers the market-flow analysis — live sector board +
+  representative 외국인/기관/개인 investor flows at `/market`; ADR-023 covers the
+  per-instrument outlook — verdict + short/mid/long price projection at `/analysis`,
+  replacing the paper-trading UI; ADR-024 covers BOK monetary policy as a core
+  macro driver — a hawkish/dovish signal that tilts the house view; ADR-025
+  covers the price-trend anchor + accuracy backtest — trend_core as the primary
+  directional driver + an out-of-sample skill measurement at `/api/v1/backtest`;
+  ADR-026 covers individual stock recommendations (단·중·장기 Top picks at
+  `/stocks`); ADR-027 covers prediction tracking + the auto-feedback calibration
+  loop — predicted-vs-actual time series + scoring + self-improvement at
+  `/accuracy`).

@@ -234,6 +234,32 @@ class MorningBriefingResponse(BaseModel):
     brief_message: str
 
 
+class SyncStatusResponse(BaseModel):
+    """Site-triggered refresh state (see briefing/sync.py)."""
+
+    running: bool
+    stage: str | None
+    stage_ko: str
+    stages: list[str]
+    started_at: str | None
+    finished_at: str | None
+    ok: bool | None
+    error: str | None
+    runtime: str
+    model: str
+    cooldown_seconds: int
+    last_prediction_at: datetime | None
+    stale: bool
+    stale_after_hours: int
+    last_result: dict[str, object] | None
+
+
+class SyncRunResponse(BaseModel):
+    started: bool
+    reason: str
+    status: SyncStatusResponse
+
+
 class AuditLogEntry(BaseModel):
     id: int
     action: str

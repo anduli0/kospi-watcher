@@ -2,14 +2,29 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  Bot,
+  GaugeCircle,
+  Home,
+  LineChart,
+  Newspaper,
+  Settings2,
+  Sparkles,
+  Target,
+  BarChart3,
+  type LucideIcon,
+} from "lucide-react";
 
-const NAV = [
-  { href: "/", label: "오늘" },
-  { href: "/prediction", label: "예측" },
-  { href: "/news", label: "뉴스" },
-  { href: "/agents", label: "에이전트" },
-  { href: "/trading", label: "트레이딩" },
-  { href: "/system", label: "시스템" },
+const NAV: { href: string; label: string; Icon: LucideIcon }[] = [
+  { href: "/", label: "오늘", Icon: Home },
+  { href: "/prediction", label: "예측", Icon: LineChart },
+  { href: "/accuracy", label: "정확도", Icon: GaugeCircle },
+  { href: "/market", label: "시장", Icon: BarChart3 },
+  { href: "/analysis", label: "포지션분석", Icon: Target },
+  { href: "/stocks", label: "종목추천", Icon: Sparkles },
+  { href: "/news", label: "뉴스", Icon: Newspaper },
+  { href: "/agents", label: "에이전트", Icon: Bot },
+  { href: "/system", label: "시스템", Icon: Settings2 },
 ];
 
 export function NavBar() {
@@ -35,12 +50,13 @@ export function NavBar() {
               key={n.href}
               href={n.href}
               className={
-                "rounded-lg px-3 py-1.5 text-sm transition-colors " +
+                "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors " +
                 (active(n.href)
                   ? "bg-elevated text-foreground"
                   : "text-muted hover:bg-elevated/60 hover:text-foreground")
               }
             >
+              <n.Icon className="h-4 w-4" aria-hidden />
               {n.label}
             </Link>
           ))}
@@ -58,10 +74,11 @@ export function NavBar() {
             key={n.href}
             href={n.href}
             className={
-              "whitespace-nowrap rounded-lg px-2.5 py-1 text-xs " +
+              "inline-flex items-center gap-1 whitespace-nowrap rounded-lg px-2.5 py-1 text-xs " +
               (active(n.href) ? "bg-elevated text-foreground" : "text-muted")
             }
           >
+            <n.Icon className="h-3.5 w-3.5" aria-hidden />
             {n.label}
           </Link>
         ))}
@@ -83,11 +100,11 @@ export function SiteFooter() {
         </p>
         <p>
           시세 데이터는 Yahoo Finance(실시간·키리스), 뉴스는 Google News 기준이며, 에이전트 분석은 현재
-          모의(mock) 또는 LLM 런타임 결과입니다. 실거래·실계좌 연결은 제공하지 않으며, 트레이딩 화면은
-          모의 체결(paper)만 지원합니다.
+          모의(mock) 또는 LLM 런타임 결과입니다. 실거래·실계좌 연결은 제공하지 않으며, 포지션분석·종목추천의
+          매수/매도 판단·목표가는 모델 기반 참고 자료(투자자문 아님)입니다.
         </p>
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
-          <span>© 2026 YellowScale · 안민규(Minkyu An). All rights reserved.</span>
+          <span>© 2026 안민규(Minkyu An). All rights reserved.</span>
           <span className="num text-[11px] text-muted/70">
             KOSPI-WATCHER · 21-agent research desk · v0.2
           </span>

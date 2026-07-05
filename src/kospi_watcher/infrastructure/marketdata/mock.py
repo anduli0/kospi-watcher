@@ -20,6 +20,8 @@ _MOCK_PRICES: dict[str, tuple[Decimal, str]] = {
     "114800": (Decimal("4200"), "KRW"),
     "252670": (Decimal("2300"), "KRW"),
     "229200": (Decimal("12500"), "KRW"),
+    "233740": (Decimal("13000"), "KRW"),
+    "251340": (Decimal("2100"), "KRW"),
     "KOSPI": (Decimal("2700.00"), "KRW"),
     "USDKRW": (Decimal("1350.00"), "KRW"),
 }

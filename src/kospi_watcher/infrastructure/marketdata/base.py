@@ -24,6 +24,8 @@ KNOWN_SYMBOLS: tuple[str, ...] = (
     "114800",  # KODEX 인버스 (1x short)
     "252670",  # KODEX 200선물인버스2X (곱버스, 2x short)
     "229200",  # KODEX KOSDAQ150
+    "233740",  # KODEX 코스닥150레버리지 (2x long KOSDAQ)
+    "251340",  # KODEX 코스닥150선물인버스 (1x short KOSDAQ)
     "KOSPI",
     "USDKRW",
 )

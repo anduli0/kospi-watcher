@@ -2,8 +2,17 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import {
+  BarChart3,
+  LineChart,
+  Newspaper,
+  Sparkles,
+  Target,
+  type LucideIcon,
+} from "lucide-react";
 
 import { api } from "@/lib/api";
+import { SyncBanner } from "@/components/sync";
 import {
   DIRECTION_KO,
   ErrorNote,
@@ -25,24 +34,47 @@ const QUOTE_NAMES: Record<string, string> = {
 
 const TODAY = new Date().toISOString().slice(0, 10);
 
-const BANNERS = [
+const BANNERS: {
+  href: string;
+  title: string;
+  desc: string;
+  accent: string;
+  Icon: LucideIcon;
+}[] = [
   {
     href: "/prediction",
     title: "예측 상세",
     desc: "논의 과정 · 조직도 · 종목 스탠스",
     accent: "from-accent/20 to-accent/0",
+    Icon: LineChart,
+  },
+  {
+    href: "/market",
+    title: "시장 흐름",
+    desc: "섹터 등락 · 외국인·기관·개인 수급",
+    accent: "from-up/20 to-up/0",
+    Icon: BarChart3,
   },
   {
     href: "/news",
     title: "뉴스 스크랩",
     desc: "일자별 한국 증시 뉴스 · 브리프 근거",
     accent: "from-accent2/20 to-accent2/0",
+    Icon: Newspaper,
   },
   {
-    href: "/trading",
-    title: "페이퍼 트레이딩",
-    desc: "모의 체결 · 계좌 · 주문 내역",
+    href: "/analysis",
+    title: "포지션 분석",
+    desc: "매수·매도 판단 · 단·중·장기 가격 시나리오",
     accent: "from-warning/20 to-warning/0",
+    Icon: Target,
+  },
+  {
+    href: "/stocks",
+    title: "종목 추천",
+    desc: "국장 개별주 · 단·중·장기 Top 픽",
+    accent: "from-up/20 to-up/0",
+    Icon: Sparkles,
   },
 ];
 
@@ -52,14 +84,21 @@ export default function Home() {
   const quotes = useApi(() => api.marketQuotes(["KOSPI", "USDKRW", "069500", "114800", "252670"]));
   const [generating, setGenerating] = useState(false);
 
+  // Ask the server for a full refresh (news → prediction → brief); the
+  // SyncBanner tracks progress and reloads the page data when it lands.
   async function generate() {
     setGenerating(true);
     try {
-      await api.runPrediction(["069500", "114800", "252670"]);
-      pred.reload();
+      await api.syncRun();
     } finally {
       setGenerating(false);
     }
+  }
+
+  function reloadAll() {
+    pred.reload();
+    brief.reload();
+    quotes.reload();
   }
 
   const p = pred.data;
@@ -76,9 +115,12 @@ export default function Home() {
           예측 리포트 · 뉴스 데일리 브리프 · <span className="num">{TODAY}</span>
         </p>
         <span className="chip border-accent2/30 bg-accent2/10 text-accent2">
-          매일 08:00 자동 업데이트 · 텔레그램 발송
+          매일 08:00 자동 업데이트 · 접속 시 자동 갱신
         </span>
       </div>
+
+      {/* Self-update strip: engine badge + last update + progress + button */}
+      <SyncBanner onSynced={reloadAll} />
 
       {/* Live quote strip */}
       <div className="card flex flex-wrap items-center gap-x-6 gap-y-2 py-3.5">
@@ -127,13 +169,6 @@ export default function Home() {
               <p className="section-label">기간</p>
               <p className="num mt-1 text-sm font-medium">{p.horizon_label}</p>
             </div>
-            <button
-              onClick={generate}
-              disabled={generating}
-              className="ml-auto rounded-xl border border-accent/40 bg-accent/10 px-3.5 py-1.5 text-xs font-semibold text-accent transition-colors hover:bg-accent/20 disabled:opacity-40"
-            >
-              {generating ? "생성 중…" : "예측 새로고침"}
-            </button>
           </div>
 
           <div className="mt-6 flex flex-wrap items-end gap-x-8 gap-y-4">
@@ -153,7 +188,8 @@ export default function Home() {
 
           <p className="mt-5 text-lg font-medium leading-snug">{p.headline}</p>
           <p className="num mt-3 text-[11px] text-muted/80">
-            분석 {p.generated_by} · {p.agent_count}에이전트 · as of {p.as_of.slice(0, 16).replace("T", " ")}
+            분석 {p.generated_by === "claude_cli" ? "내 클로드" : p.generated_by} · {p.agent_count}에이전트 · as of{" "}
+            {p.as_of.slice(0, 16).replace("T", " ")}
           </p>
         </section>
       )}
@@ -194,7 +230,7 @@ export default function Home() {
           <Loading />
         ) : b ? (
           <>
-            <p className="mt-3 leading-7 text-foreground/90">{b.summary}</p>
+            <p className="mt-3 whitespace-pre-line leading-7 text-foreground/90">{b.summary}</p>
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
               {b.themes.slice(0, 4).map((t) => (
                 <div key={t.topic} className="rounded-xl border border-border/60 bg-elevated/40 p-3">
@@ -253,14 +289,15 @@ export default function Home() {
       )}
 
       {/* Banner navigation */}
-      <section className="grid gap-4 sm:grid-cols-3">
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {BANNERS.map((b) => (
           <Link
             key={b.href}
             href={b.href}
             className={`card card-hover relative overflow-hidden bg-gradient-to-br ${b.accent}`}
           >
-            <p className="text-base font-semibold tracking-tight">{b.title}</p>
+            <b.Icon className="h-5 w-5 text-foreground/70" aria-hidden />
+            <p className="mt-3 text-base font-semibold tracking-tight">{b.title}</p>
             <p className="mt-1.5 text-sm text-muted">{b.desc}</p>
             <span className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-accent">
               열기 <span aria-hidden>→</span>

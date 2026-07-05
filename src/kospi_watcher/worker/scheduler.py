@@ -13,7 +13,8 @@ from apscheduler.triggers.cron import CronTrigger
 
 from kospi_watcher.briefing.service import run_morning_briefing
 from kospi_watcher.config import get_settings
-from kospi_watcher.domain.time import now_utc
+from kospi_watcher.db import repositories
+from kospi_watcher.domain.time import now_utc, to_kst
 from kospi_watcher.infrastructure.db import get_sessionmaker
 from kospi_watcher.logging_config import get_logger
 from kospi_watcher.newsfeed.service import NewsService
@@ -46,6 +47,35 @@ async def morning_briefing() -> None:
     )
 
 
+async def ensure_daily_briefing() -> None:
+    """Catch-up safety net so the daily brief is *guaranteed once a day*.
+
+    The 08:00 cron only fires if the worker happens to be alive at exactly that
+    moment — a PC that was off at 08:00 (and logged in at, say, 09:11), a resume
+    from sleep, or a crash-restart would otherwise silently skip the whole day.
+    This job (run on startup and every 30 min) checks whether today's (KST) news
+    brief already exists; if not, and it's already past the scheduled briefing
+    time, it runs the full morning pipeline now. Idempotent — once today's brief
+    exists it returns immediately, so it never double-sends on a normal day."""
+    settings = get_settings()
+    now_kst = to_kst(now_utc())
+    today_kst = now_kst.date().isoformat()
+    async with get_sessionmaker()() as session:
+        existing = await repositories.get_daily_brief(session, today_kst)
+    if existing is not None:
+        return  # already produced today (by the cron, a manual run, or an earlier catch-up)
+    scheduled = now_kst.replace(
+        hour=settings.morning_briefing_hour,
+        minute=settings.morning_briefing_minute,
+        second=0,
+        microsecond=0,
+    )
+    if now_kst < scheduled:
+        return  # before today's scheduled time — let the 08:00 cron handle it
+    log.info("worker.ensure_daily_briefing.catch_up", date=today_kst)
+    await morning_briefing()
+
+
 def build_scheduler() -> AsyncIOScheduler:
     settings = get_settings()
     scheduler = AsyncIOScheduler(timezone="UTC")
@@ -62,5 +92,22 @@ def build_scheduler() -> AsyncIOScheduler:
         ),
         id="morning_briefing",
         replace_existing=True,
+        # If the loop was briefly busy/suspended at 08:00, still run (up to 1h late)
+        # rather than silently skip; coalesce collapses any pile-up to one run.
+        misfire_grace_time=3600,
+        coalesce=True,
+    )
+    # Catch-up safety net: runs immediately on start, then every 30 min. Guarantees
+    # today's brief even if the worker missed the exact 08:00 cron (PC off, sleep,
+    # crash-restart). Idempotent once today's brief exists.
+    scheduler.add_job(
+        ensure_daily_briefing,
+        "interval",
+        minutes=30,
+        id="ensure_daily_briefing",
+        replace_existing=True,
+        next_run_time=now_utc(),
+        misfire_grace_time=600,
+        coalesce=True,
     )
     return scheduler

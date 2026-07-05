@@ -9,9 +9,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Query
 
 from kospi_watcher.api.schemas.responses import MarketQuote, MarketQuotesResponse
+from kospi_watcher.domain.market_analysis import MarketAnalysis
 from kospi_watcher.infrastructure.marketdata import (
     KNOWN_SYMBOLS,
     get_market_data_provider,
+)
+from kospi_watcher.infrastructure.marketdata.analysis import (
+    get_market_analysis_service,
 )
 
 router = APIRouter(tags=["market"])
@@ -42,3 +46,13 @@ async def market_quotes(
             for q in quotes.values()
         ],
     )
+
+
+@router.get("/market/analysis", response_model=MarketAnalysis)
+async def market_analysis() -> MarketAnalysis:
+    """What moved KOSPI today: live sector board + (representative) investor flows.
+
+    Sectors are live/keyless (Yahoo) and labelled per-sector; investor
+    (외국인/기관/개인) flows are representative — see ``flow_source``.
+    """
+    return await get_market_analysis_service().build()

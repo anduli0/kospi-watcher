@@ -8,10 +8,15 @@
 
 version: 1
 
-# Only KOSPI200-linked ETFs are tradable in this phase (mock).
+# KOSPI200 / KOSDAQ150 ETF ladder (long, leveraged, inverse, 곱버스).
 allowed_instruments:
-  - "069500"   # KODEX 200
-  - "102110"   # TIGER 200
+  - "069500"   # KODEX 200 (1x long)
+  - "102110"   # TIGER 200 (1x long)
+  - "122630"   # KODEX 레버리지 (2x long)
+  - "114800"   # KODEX 인버스 (1x inverse)
+  - "252670"   # KODEX 200선물인버스2X — 곱버스 (2x inverse)
+  - "233740"   # KODEX 코스닥150레버리지 (2x long KOSDAQ)
+  - "251340"   # KODEX 코스닥150인버스(H) (1x inverse KOSDAQ)
 allowed_strategies:
   - "baseline-momentum-v0"
   - "mean-reversion-v0"

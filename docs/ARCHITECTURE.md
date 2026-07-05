@@ -848,7 +848,7 @@ the **Korean convention up = red (`--up`), down = blue (`--down`)**.
   investment advice; predictions/stances are algorithm/agent-generated references;
   inverse/leveraged (곱버스) products carry decay and principal-loss risk; data
   sources (Yahoo / Google News) and the mock-or-LLM runtime are named; no live
-  trading — and an **ownership** line, `© 2026 YellowScale · 안민규(Minkyu An)`.
+  trading — and an **ownership** line, `© 2026 안민규(Minkyu An)`.
 
 ---
 

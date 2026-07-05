@@ -6,8 +6,25 @@
  * order-submission endpoint in this phase.
  */
 
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+/**
+ * Resolve the API base URL.
+ *
+ * In the browser we always call our OWN origin (relative paths). Next.js rewrites
+ * proxy `/api/*` and `/health` to the API server-side (see next.config.mjs), so
+ * the client bundle carries no hardcoded host — it works identically on
+ * localhost, over LAN, and behind any public tunnel, with no CORS. Only
+ * server-side code (SSR/build, no `window`) falls back to an absolute URL.
+ */
+function resolveApiBase(): string {
+  if (typeof window !== "undefined") {
+    return ""; // same-origin; proxied by Next rewrites
+  }
+  const env = process.env.NEXT_PUBLIC_API_BASE_URL;
+  if (env && env.trim()) return env.trim().replace(/\/+$/, "");
+  return "http://127.0.0.1:18080";
+}
+
+export const API_BASE_URL = resolveApiBase();
 
 // --- Response types (mirror src/kospi_watcher/api/schemas/responses.py) ---
 
@@ -190,6 +207,97 @@ export interface Deliberation {
   chief: ChiefDeliberation;
 }
 
+export type PolicyStance = "HAWKISH" | "NEUTRAL" | "DOVISH";
+
+export interface MonetaryPolicySignal {
+  stance: PolicyStance;
+  expected_hikes_2026: number; // negative = cuts
+  equity_bias: Direction; // KOSPI implication (hawkish → BEARISH)
+  confidence: number;
+  rationale: string;
+  drivers: string[];
+  source: string; // "config" | "news" | "mock"
+  as_of: string;
+}
+
+export interface TrendSignal {
+  direction: Direction;
+  strength: number; // 0..1
+  price: string | null;
+  sma100: string | null;
+  mom60_pct: string | null;
+  note: string;
+  source: string; // "yahoo" | "mock" | "none"
+}
+
+export interface HorizonAccuracy {
+  horizon_days: number;
+  label: string;
+  hit_rate: number;
+  base_rate: number;
+  skill: number;
+  coverage: number;
+  sample: number;
+}
+
+export interface BacktestReport {
+  as_of: string;
+  symbol: string;
+  source: string;
+  n_days: number;
+  test_fraction: number;
+  train: HorizonAccuracy[];
+  test: HorizonAccuracy[];
+  primary_horizon_days: number;
+  primary_hit_rate: number;
+  primary_base_rate: number;
+  primary_skill: number;
+  interpretation: string;
+}
+
+// --- Prediction tracking + auto-feedback calibration (ADR-027) ---
+
+export interface TrackPoint {
+  date: string;
+  actual_cum_pct: number;
+  model_cum_pct: number;
+  predicted_dir: Direction;
+  hit: boolean | null;
+}
+
+export interface AccuracyScore {
+  samples: number;
+  hit_rate: number;
+  base_rate: number;
+  skill: number;
+  bull_samples: number;
+  bear_samples: number;
+  bull_hit: number | null;
+  bear_hit: number | null;
+  coverage: number;
+  final_actual_cum_pct: number;
+  final_model_cum_pct: number;
+}
+
+export interface Calibration {
+  direction_bias: number;
+  confidence_target: number; // realized hit rate the confidence is anchored to
+  grade: string;
+  basis: string;
+}
+
+export interface AccuracyTrackReport {
+  as_of: string;
+  symbol: string;
+  source: string;
+  horizon_days: number;
+  window_days: number;
+  points: TrackPoint[];
+  score: AccuracyScore;
+  calibration: Calibration;
+  interpretation: string;
+}
+
 export interface MarketPrediction {
   prediction_id: string;
   as_of: string;
@@ -204,6 +312,9 @@ export interface MarketPrediction {
   brief: string;
   desk_views: DeskView[];
   deliberation: Deliberation | null;
+  monetary_policy: MonetaryPolicySignal | null;
+  trend_signal: TrendSignal | null;
+  calibration: Calibration | null;
   instrument_stances: InstrumentStance[];
   scenarios: Scenario[];
   news_refs: string[];
@@ -231,14 +342,24 @@ export interface NewsHeadline {
 export interface NewsTheme {
   topic: string;
   count: number;
+  read?: string;
   headlines: NewsHeadline[];
+}
+
+export interface NewsKeyPoint {
+  tag: string;
+  title: string;
+  source: string;
+  url: string;
 }
 
 export interface NewsBrief {
   date: string;
   item_count: number;
+  is_trading_day?: boolean; // false on weekends/휴장일
   summary: string;
   market_read: string;
+  key_points?: NewsKeyPoint[];
   themes: NewsTheme[];
   generated_by: string;
 }
@@ -252,6 +373,38 @@ export interface MorningBriefing {
   telegram_brief: string;
   report_message: string;
   brief_message: string;
+}
+
+export interface SyncLastResult {
+  direction?: string;
+  confidence?: number;
+  generated_by?: string;
+  news_added?: number;
+  brief_items?: number;
+}
+
+export interface SyncStatus {
+  running: boolean;
+  stage: string | null;
+  stage_ko: string;
+  stages: string[];
+  started_at: string | null;
+  finished_at: string | null;
+  ok: boolean | null;
+  error: string | null;
+  runtime: string; // "mock" | "llm" | "claude_cli"
+  model: string;
+  cooldown_seconds: number;
+  last_prediction_at: string | null;
+  stale: boolean;
+  stale_after_hours: number;
+  last_result: SyncLastResult | null;
+}
+
+export interface SyncRunResult {
+  started: boolean;
+  reason: string;
+  status: SyncStatus;
 }
 
 export interface NewsListResponse {
@@ -317,6 +470,90 @@ export interface MarketQuotesResponse {
   quotes: MarketQuote[];
 }
 
+// --- Market-flow analysis (sectors + investor flows; mirrors domain/market_analysis) ---
+
+export interface SectorMove {
+  key: string;
+  name: string;
+  symbol: string;
+  price: string | null;
+  change_pct: string; // signed percent, as string (Decimal)
+  source: string; // "yahoo" | "mock"
+}
+
+export interface InvestorTrendPoint {
+  date: string;
+  net: string; // 억원, signed
+}
+
+export interface InvestorFlow {
+  investor: "FOREIGN" | "INSTITUTION" | "INDIVIDUAL";
+  label: string;
+  net_today: string;
+  net_5d: string;
+  trend: InvestorTrendPoint[];
+  source: string; // "representative" | "mock"
+}
+
+export interface MarketAnalysis {
+  as_of: string;
+  index_symbol: string;
+  index_price: string | null;
+  index_change_pct: string | null;
+  sectors: SectorMove[];
+  leaders: SectorMove[];
+  laggards: SectorMove[];
+  flows: InvestorFlow[];
+  narrative: string;
+  sector_source: string;
+  flow_source: string;
+}
+
+// --- Per-instrument analysis (verdict + short/mid/long outlook; ADR-023) ---
+
+export type PositionVerdict = "BUY" | "HOLD" | "SELL";
+
+export interface HorizonProjection {
+  horizon: "SHORT" | "MID" | "LONG";
+  label: string;
+  direction: Direction;
+  expected_return_pct: string; // signed %, as string
+  target_low: string | null;
+  target_base: string | null;
+  target_high: string | null;
+  rationale: string;
+}
+
+export interface InstrumentOutlook {
+  symbol: string;
+  name: string;
+  kind: string;
+  current_price: string | null;
+  price_source: string;
+  verdict: PositionVerdict;
+  verdict_label: string;
+  stance_label: StanceLabel;
+  conviction: number;
+  summary: string;
+  risk_note: string | null;
+  projections: HorizonProjection[];
+}
+
+export interface InstrumentAnalysisReport {
+  as_of: string;
+  subject: string;
+  direction: Direction;
+  confidence: number;
+  regime: string;
+  generated_by: string;
+  house_summary: string;
+  monetary_policy: MonetaryPolicySignal | null;
+  trend_signal: TrendSignal | null;
+  instruments: InstrumentOutlook[];
+  price_source: string;
+  disclaimer: string;
+}
+
 export interface FillResponse {
   id: string;
   symbol: string;
@@ -378,6 +615,46 @@ export interface SubmitOrderResponse {
   position: PositionResponse | null;
 }
 
+// --- Individual stock recommendations (ADR-026) ---
+
+export type StockHorizonKey = "SHORT" | "MID" | "LONG";
+
+export interface StockPick {
+  rank: number;
+  code: string;
+  name: string;
+  sector: string;
+  themes: string[];
+  price: string | null;
+  momentum_pct: string | null;
+  stretch_pct: string | null;
+  overheated: boolean;
+  conviction: string; // 적극매수 | 매수 | 관심
+  score: number;
+  drivers: string[];
+  rationale: string;
+  detail: string;
+  news_catalyst: string | null;
+}
+
+export interface HorizonRecommendation {
+  horizon: StockHorizonKey;
+  label: string;
+  approach: string;
+  picks: StockPick[];
+}
+
+export interface StockRecommendationReport {
+  as_of: string;
+  house_direction: Direction;
+  house_regime: string;
+  monetary_stance: string;
+  universe_size: number;
+  price_source: string;
+  horizons: HorizonRecommendation[];
+  disclaimer: string;
+}
+
 // --- Fetch helper ---
 
 export class ApiError extends Error {
@@ -390,22 +667,48 @@ export class ApiError extends Error {
   }
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Fetch a JSON endpoint with built-in resilience.
+ *
+ * Network failures (the backend briefly down — e.g. the API's self-healing
+ * restart, or the page opened before the API is up) are retried a few times
+ * with exponential backoff before surfacing as an error. Only safe (GET)
+ * requests are retried, so a POST (e.g. generating a prediction) is never
+ * accidentally sent twice. HTTP error responses (4xx/5xx) are NOT retried —
+ * they are deterministic and bubble up immediately (e.g. 404 = no prediction).
+ */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  let resp: Response;
-  try {
-    resp = await fetch(`${API_BASE_URL}${path}`, {
-      ...init,
-      headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
-      cache: "no-store",
-    });
-  } catch (cause) {
-    throw new ApiError(0, `API unreachable at ${API_BASE_URL} (${String(cause)})`);
+  const method = (init?.method ?? "GET").toUpperCase();
+  const retryable = method === "GET";
+  const maxAttempts = retryable ? 3 : 1;
+
+  let lastCause: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    let resp: Response;
+    try {
+      resp = await fetch(`${API_BASE_URL}${path}`, {
+        ...init,
+        headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
+        cache: "no-store",
+      });
+    } catch (cause) {
+      lastCause = cause;
+      if (attempt < maxAttempts - 1) {
+        await sleep(400 * 2 ** attempt); // 400ms, 800ms
+        continue;
+      }
+      throw new ApiError(0, `API unreachable at ${API_BASE_URL} (${String(cause)})`);
+    }
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => resp.statusText);
+      throw new ApiError(resp.status, detail || resp.statusText);
+    }
+    return (await resp.json()) as T;
   }
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => resp.statusText);
-    throw new ApiError(resp.status, detail || resp.statusText);
-  }
-  return (await resp.json()) as T;
+  // Unreachable (loop either returns or throws), but satisfies the type checker.
+  throw new ApiError(0, `API unreachable at ${API_BASE_URL} (${String(lastCause)})`);
 }
 
 // --- Endpoints (7) ---
@@ -428,6 +731,13 @@ export const api = {
     request<MarketQuotesResponse>(
       "/api/v1/market/quotes" + (symbols?.length ? `?symbols=${symbols.join(",")}` : ""),
     ),
+  marketAnalysis: () => request<MarketAnalysis>("/api/v1/market/analysis"),
+  instrumentAnalysis: () =>
+    request<InstrumentAnalysisReport>("/api/v1/analysis/instruments"),
+  backtest: () => request<BacktestReport>("/api/v1/backtest"),
+  accuracyTrack: () => request<AccuracyTrackReport>("/api/v1/accuracy/track"),
+  stockRecommendations: () =>
+    request<StockRecommendationReport>("/api/v1/stocks/recommendations"),
   submitOrder: (proposal: OrderProposalInput, marketOpen = true, lastPrice?: string) =>
     request<SubmitOrderResponse>("/api/v1/orders", {
       method: "POST",
@@ -458,6 +768,8 @@ export const api = {
   runNewsBrief: () => request<NewsBrief>("/api/v1/news/brief/run", { method: "POST" }),
   morningBriefing: () =>
     request<MorningBriefing>("/api/v1/notify/morning", { method: "POST" }),
+  syncStatus: () => request<SyncStatus>("/api/v1/sync/status"),
+  syncRun: () => request<SyncRunResult>("/api/v1/sync/run", { method: "POST" }),
   validateProposal: (proposal: OrderProposalInput) =>
     request<{ valid: boolean; proposal_id: string; detail: string }>(
       "/api/v1/order-proposals/validate",

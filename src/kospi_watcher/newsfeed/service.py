@@ -58,9 +58,13 @@ class NewsService:
     async def generate_daily_brief(
         self, session: AsyncSession, *, date_kst: str | None = None
     ) -> NewsBrief:
-        """Build and persist the news daily brief for a KST day (today by default),
-        tying the day's headlines to the latest prediction's house view."""
-        date_kst = date_kst or to_kst(now_utc()).date().isoformat()
+        """Build and persist the news daily brief for a KST day, tying the day's
+        headlines to the latest prediction's house view. Defaults to the most
+        recent KST day that actually has news (robust just after KST midnight,
+        before today's scrape has landed), falling back to today."""
+        if date_kst is None:
+            dates = await repositories.news_dates(session)
+            date_kst = dates[0][0] if dates else to_kst(now_utc()).date().isoformat()
         rows = await repositories.list_news(session, date_kst=date_kst, limit=200)
 
         pred_row = await repositories.get_latest_prediction(session)
