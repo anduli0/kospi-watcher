@@ -45,6 +45,13 @@ _KICKOFF.md
 .next-public/
 apps/web/.next-public/
 
+# cloud static-site build (ADR-030): generated snapshot + export output + temp DBs
+.next-static/
+apps/web/.next-static/
+apps/web/out/
+apps/web/public/snapshot/
+snapshot_build*.db
+
 # local cloudflared binary + tunnel logs (deploy/public-url)
 scripts/bin/
 scripts/*.log

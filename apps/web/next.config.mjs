@@ -10,7 +10,34 @@ const API_PROXY_TARGET = process.env.API_PROXY_TARGET ?? "http://127.0.0.1:18080
 // clobbering each other's `.next`.
 const DIST_DIR = process.env.NEXT_DIST_DIR ?? ".next";
 
-const nextConfig = {
+// Static-snapshot mode: the always-on cloud build for GitHub Pages. It has no
+// live backend — pages read pre-generated JSON snapshots (see lib/api.ts). Next
+// then emits a fully static site (`output: "export"`) under `out/`, served from
+// a project subpath (basePath, e.g. "/kospi-watcher"). The live PC build leaves
+// STATIC unset and keeps the same-origin API proxy, so it is unchanged.
+const STATIC = process.env.NEXT_PUBLIC_STATIC_SNAPSHOT === "1";
+// Accept the base path with or without a leading slash (Git Bash on Windows
+// mangles a leading-slash env value into a path), then normalize to "/name".
+const RAW_BASE = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/^\/+|\/+$/g, "");
+const BASE_PATH = RAW_BASE ? `/${RAW_BASE}` : "";
+
+/** @type {import('next').NextConfig} */
+const staticConfig = {
+  reactStrictMode: true,
+  distDir: DIST_DIR,
+  output: "export",
+  basePath: BASE_PATH || undefined,
+  assetPrefix: BASE_PATH || undefined,
+  trailingSlash: true, // Pages serves /route/ as /route/index.html
+  images: { unoptimized: true },
+  env: {
+    NEXT_PUBLIC_STATIC_SNAPSHOT: "1",
+    NEXT_PUBLIC_BASE_PATH: BASE_PATH,
+  },
+};
+
+/** @type {import('next').NextConfig} */
+const liveConfig = {
   reactStrictMode: true,
   distDir: DIST_DIR,
   // Legacy: still exposed for any server-side fallback in lib/api.ts.
@@ -29,4 +56,4 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+export default STATIC ? staticConfig : liveConfig;

@@ -11,9 +11,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCw, Sparkles } from "lucide-react";
+import { Cloud, RefreshCw, Sparkles } from "lucide-react";
 
-import { api, type SyncStatus } from "@/lib/api";
+import { IS_STATIC, api, type SyncStatus } from "@/lib/api";
 
 const POLL_MS = 5000;
 
@@ -44,7 +44,58 @@ export function engineLabel(runtime: string): string {
   return "기본 분석 모드";
 }
 
+/**
+ * Read-only banner for the always-on cloud (GitHub Pages) build. There is no
+ * live backend to trigger, so it just shows the engine + when GitHub Actions
+ * last rebuilt the site. No polling, no buttons.
+ */
+function StaticSyncBanner() {
+  const [status, setStatus] = useState<SyncStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api
+      .syncStatus()
+      .then((s) => alive && setStatus(s))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (!status) return null;
+  const live = status.runtime !== "mock";
+  return (
+    <div className="card flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
+      <span
+        className={`chip ${
+          live
+            ? "border-accent/40 bg-accent/10 text-accent"
+            : "border-border/60 bg-elevated/40 text-muted"
+        }`}
+      >
+        <Sparkles className="mr-1 inline h-3 w-3" aria-hidden />
+        {engineLabel(status.runtime)}
+      </span>
+      <span className="text-sm text-muted">
+        마지막 업데이트{" "}
+        <span className="num text-foreground/90">{kstTime(status.last_prediction_at)}</span>
+        {status.last_prediction_at && (
+          <span className="num"> · {agoText(status.last_prediction_at)}</span>
+        )}
+      </span>
+      <span className="ml-auto inline-flex items-center gap-1.5 chip border-accent2/30 bg-accent2/10 text-accent2">
+        <Cloud className="h-3.5 w-3.5" aria-hidden />
+        클라우드에서 매일 자동 업데이트 (PC 없이 상시 가동)
+      </span>
+    </div>
+  );
+}
+
 export function SyncBanner({ onSynced }: { onSynced?: () => void }) {
+  // IS_STATIC is a build-time constant, so this branch is stable per build.
+  return IS_STATIC ? <StaticSyncBanner /> : <LiveSyncBanner onSynced={onSynced} />;
+}
+
+function LiveSyncBanner({ onSynced }: { onSynced?: () => void }) {
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [starting, setStarting] = useState(false);
   const autoFired = useRef(false);

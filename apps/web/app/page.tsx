@@ -11,7 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { IS_STATIC, api } from "@/lib/api";
 import { SyncBanner } from "@/components/sync";
 import {
   DIRECTION_KO,
@@ -149,13 +149,19 @@ export default function Home() {
             21개 분석 에이전트를 5개 데스크로 계층 종합해 코스피 방향·국면·롱/인버스/곱버스 스탠스와
             데일리 브리프를 생성합니다.
           </p>
-          <button
-            onClick={generate}
-            disabled={generating}
-            className="rounded-xl border border-accent/40 bg-accent/10 px-4 py-2 text-sm font-semibold text-accent transition-colors hover:bg-accent/20 disabled:opacity-40"
-          >
-            {generating ? "생성 중…" : "오늘의 예측 생성"}
-          </button>
+          {IS_STATIC ? (
+            <p className="text-sm text-muted">
+              클라우드에서 매일 자동으로 예측을 생성합니다. 잠시 후 새로고침해 주세요.
+            </p>
+          ) : (
+            <button
+              onClick={generate}
+              disabled={generating}
+              className="rounded-xl border border-accent/40 bg-accent/10 px-4 py-2 text-sm font-semibold text-accent transition-colors hover:bg-accent/20 disabled:opacity-40"
+            >
+              {generating ? "생성 중…" : "오늘의 예측 생성"}
+            </button>
+          )}
           {pred.error && !notFound && <ErrorNote error={pred.error} />}
         </section>
       ) : (

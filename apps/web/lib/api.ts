@@ -26,6 +26,30 @@ function resolveApiBase(): string {
 
 export const API_BASE_URL = resolveApiBase();
 
+// --- Static-snapshot mode (always-on cloud build on GitHub Pages) ---
+//
+// When NEXT_PUBLIC_STATIC_SNAPSHOT=1 the site has NO live API: GET calls read
+// pre-generated JSON under `<basePath>/snapshot/*.json` (built in CI by
+// scripts/build_snapshot.py), and mutating calls are disabled. This lets the
+// whole site run always-on on GitHub Pages, independent of the PC. The live
+// PC/LAN build leaves this unset and behaves exactly as before (same-origin
+// proxy to the FastAPI backend), so nothing about the local deployment changes.
+export const IS_STATIC = process.env.NEXT_PUBLIC_STATIC_SNAPSHOT === "1";
+const SNAPSHOT_BASE = (process.env.NEXT_PUBLIC_BASE_PATH ?? "").replace(/\/+$/, "");
+
+/** Map an API path (with optional query) to its static snapshot file. */
+function snapshotUrl(path: string): string {
+  const [rawPath, query = ""] = path.split("?");
+  let key = rawPath.replace(/^\/(api\/v1\/)?/, "").replace(/\/+$/, "");
+  if (key === "news") {
+    const date = new URLSearchParams(query).get("date");
+    key = date ? `news-${date}` : "news-latest";
+  } else {
+    key = key.replace(/\//g, "-") || "health";
+  }
+  return `${SNAPSHOT_BASE}/snapshot/${key}.json`;
+}
+
 // --- Response types (mirror src/kospi_watcher/api/schemas/responses.py) ---
 
 export interface HealthResponse {
@@ -681,6 +705,25 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? "GET").toUpperCase();
+
+  // Static cloud build: serve GETs from the pre-generated snapshot, disable POSTs.
+  if (IS_STATIC) {
+    if (method !== "GET") {
+      throw new ApiError(405, "정적 사이트에서는 사용할 수 없는 동작입니다.");
+    }
+    const url = snapshotUrl(path);
+    let resp: Response;
+    try {
+      resp = await fetch(url, { cache: "no-store" });
+    } catch (cause) {
+      throw new ApiError(0, `snapshot unreachable at ${url} (${String(cause)})`);
+    }
+    if (!resp.ok) {
+      throw new ApiError(resp.status, `snapshot missing: ${url}`);
+    }
+    return (await resp.json()) as T;
+  }
+
   const retryable = method === "GET";
   const maxAttempts = retryable ? 3 : 1;
 

@@ -1,0 +1,94 @@
+name: cloud-site
+
+# Always-on KOSPI-WATCHER on GitHub Pages, PC-independent (ADR-030).
+#
+# Each run rebuilds the whole site in the cloud: it runs the real pipeline
+# (scrape -> predict -> news brief), dumps a static JSON snapshot, does a static
+# Next.js export, and deploys to Pages. The morning slot runs the 21 agents on
+# the Claude subscription (`claude -p` via CLAUDE_CODE_OAUTH_TOKEN) for the daily
+# analysis; the lighter intraday slots run the deterministic engine (no
+# subscription spend) just to refresh prices/news. KOSPI's forecast is
+# deterministic, so the site is correct either way.
+
+on:
+  schedule:
+    - cron: '20 22 * * *'   # 07:20 KST — daily Claude analysis (full)
+    - cron: '0 4 * * *'     # 13:00 KST — deterministic refresh
+    - cron: '0 11 * * *'    # 20:00 KST — deterministic refresh
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: cloud-site
+  cancel-in-progress: false
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      TZ: Asia/Seoul
+      AGENT_CLI_MODEL: claude-sonnet-5
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      MARKET_DATA_PROVIDER: yahoo
+      NEWS_PROVIDER: google
+      DATABASE_URL: sqlite+aiosqlite:///./snapshot_build.db
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Full Claude analysis in the morning; cheap deterministic refresh otherwise.
+      # Manual runs (workflow_dispatch) always do the full Claude analysis.
+      - name: Decide agent runtime
+        run: |
+          hour=$(date +%H)   # KST (TZ=Asia/Seoul)
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$hour" -lt 10 ]; then
+            echo "AGENT_RUNTIME=claude_cli" >> "$GITHUB_ENV"
+            echo "Runtime: claude_cli (full daily analysis)"
+          else
+            echo "AGENT_RUNTIME=mock" >> "$GITHUB_ENV"
+            echo "Runtime: mock (deterministic refresh)"
+          fi
+
+      - name: Install Claude Code CLI
+        if: env.AGENT_RUNTIME == 'claude_cli'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Install Python package
+        run: pip install -e .
+
+      - name: Build data snapshot (scrape -> predict -> brief -> JSON)
+        run: python scripts/build_snapshot.py
+
+      - name: Install web dependencies
+        run: npm ci
+
+      - name: Static export of the web
+        working-directory: apps/web
+        env:
+          NEXT_PUBLIC_STATIC_SNAPSHOT: '1'
+          NEXT_PUBLIC_BASE_PATH: kospi-watcher
+        run: npx next build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/out
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
