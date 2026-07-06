@@ -49,6 +49,20 @@ const BANNERS: {
     Icon: LineChart,
   },
   {
+    href: "/stocks",
+    title: "종목 추천",
+    desc: "국장 개별주 · 단·중·장기 Top 픽",
+    accent: "from-up/20 to-up/0",
+    Icon: Sparkles,
+  },
+  {
+    href: "/analysis",
+    title: "포지션 분석",
+    desc: "매수·매도 판단 · 단·중·장기 가격 시나리오",
+    accent: "from-warning/20 to-warning/0",
+    Icon: Target,
+  },
+  {
     href: "/market",
     title: "시장 흐름",
     desc: "섹터 등락 · 외국인·기관·개인 수급",
@@ -61,20 +75,6 @@ const BANNERS: {
     desc: "일자별 한국 증시 뉴스 · 브리프 근거",
     accent: "from-accent2/20 to-accent2/0",
     Icon: Newspaper,
-  },
-  {
-    href: "/analysis",
-    title: "포지션 분석",
-    desc: "매수·매도 판단 · 단·중·장기 가격 시나리오",
-    accent: "from-warning/20 to-warning/0",
-    Icon: Target,
-  },
-  {
-    href: "/stocks",
-    title: "종목 추천",
-    desc: "국장 개별주 · 단·중·장기 Top 픽",
-    accent: "from-up/20 to-up/0",
-    Icon: Sparkles,
   },
 ];
 

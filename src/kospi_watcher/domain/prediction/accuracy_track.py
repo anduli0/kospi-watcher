@@ -24,9 +24,9 @@ from decimal import Decimal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from kospi_watcher.domain.enums import MarketDirection
-from kospi_watcher.domain.prediction.trend_signal import trend_core
+from kospi_watcher.domain.prediction.trend_signal import TREND_WARMUP, trend_core
 
-_WARMUP = 100  # trend_core needs the 100-day SMA
+_WARMUP = TREND_WARMUP  # trend_core needs its 200-day structure SMA
 _WINDOW = 250  # chart window (~1 year of trading days, to span regimes)
 _H = 5  # scoring horizon (D5, matches the prediction horizon)
 

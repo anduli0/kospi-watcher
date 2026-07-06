@@ -19,10 +19,15 @@ def _rising(n: int) -> list[Decimal]:
 
 
 def _rise_then_fall(n: int) -> list[Decimal]:
+    # A flat base, then a slow grind lower — the downtrend shape the
+    # recalibrated signal (ADR-029) is designed to call: structure breaks while
+    # the price stays inside the (-10%, -3%) bear band (a fast crash would land
+    # in the oversold rebound zone, where the signal refuses to chase).
     out: list[Decimal] = []
     px = 1000.0
     for k in range(n):
-        px *= 1.005 if k < n * 2 // 3 else 0.994
+        if k >= 150:
+            px *= 0.999
         out.append(Decimal(str(round(px, 2))))
     return out
 

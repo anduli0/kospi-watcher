@@ -1,8 +1,8 @@
-"""Provides the latest price-trend signal that anchors the prediction (ADR-025).
+"""Provides the latest price-trend signal that anchors the prediction (ADR-025/029).
 
-Fetches ~1y of daily closes (enough for the 100-day SMA + 60-day momentum) and
-builds the deterministic :class:`TrendSignal`. Cached for a TTL; never fails
-(labelled offline series on fetch failure)."""
+Fetches ~2y of daily closes (the recalibrated signal needs the 200-day structure
+SMA + headroom) and builds the deterministic :class:`TrendSignal`. Cached for a
+TTL; never fails (labelled offline series on fetch failure)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from kospi_watcher.domain.prediction.trend_signal import TrendSignal, build_tren
 from kospi_watcher.infrastructure.marketdata.history import fetch_daily_closes
 
 
-def _mock_series(n: int = 260) -> list[Decimal]:
+def _mock_series(n: int = 420) -> list[Decimal]:
     rng = random.Random(20260618)  # noqa: S311 (non-crypto, deterministic offline)
     px = 2500.0
     out: list[Decimal] = []
@@ -34,8 +34,8 @@ class TrendService:
         cached = self._cache.get(symbol)
         if cached is not None and cached[0] > now:
             return cached[1]
-        closes = await fetch_daily_closes(symbol, rng="1y")
-        if len(closes) >= 120:
+        closes = await fetch_daily_closes(symbol, rng="2y")
+        if len(closes) >= 260:
             source = "yahoo"
         else:
             closes = _mock_series()

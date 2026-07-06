@@ -102,21 +102,26 @@ recommender (`domain/stocks/`) ranks a curated 30-name KOSPI/KOSDAQ universe int
 view, the live sector board, BOK policy, structural themes, and news catalysts.
 `GET /api/v1/stocks/recommendations`. Display-only 참고 자료 (면책); bold but reasoned.
 
-**Price-trend anchor + accuracy backtest (ADR-025).** The prediction now anchors
-on the **real price trend** as its *primary* directional driver. `trend_core`
-(`domain/prediction/trend_signal.py`) is a deterministic past-only signal —
-price vs 100-day SMA, gated by 60-day momentum agreement — that overrides the
+**Price-trend anchor + accuracy backtest (ADR-025, recalibrated by ADR-029).**
+The prediction anchors on the **real price trend** as its *primary* directional
+driver. `trend_core` (`domain/prediction/trend_signal.py`) is a deterministic
+past-only signal, recalibrated on 29y of ^KS11 with walk-forward selection +
+held-out/KOSDAQ/bear-window gates (ADR-029): **bullish by default**; **bearish
+only under strict confirmation** (price 3%+ below the 100-day SMA AND negative
+60-day momentum AND SMA50<SMA200), and never a fresh bear call >10% below the
+line (oversold rebound zone → weak default long). Warmup = 200 sessions
+(`TREND_WARMUP`); NEUTRAL now only means insufficient history. It overrides the
 FLOW_TECH `Breadth and Technical Agent` finding AND tilts the Chief score (above
-the BOK tilt). The **same function** is run over 5 years of ^KS11 daily closes
-(`infrastructure/marketdata/history.py`, keyless Yahoo) to measure
-**directional accuracy out-of-sample**: `GET /api/v1/backtest` returns hit rate,
-`naive = max(base_up, 1-base_up)` base rate, and **skill** per horizon (D5/D20/
-D60), train/test split. Honest interpretation: D20 train hit 55.5% vs base 53.0%
-(**+2.5%p skill** — a verified directional edge on balanced markets); the test
-window's negative skill is the bull-market base-rate ceiling, not a signal flaw.
-The trend anchor's job is to keep the house view aligned with the market (so a
-hawkish BOK doesn't drive the prediction into a strong uptrend), not to beat
-single-digit coin-flips. Visible via `TrendSignalCard` + `BacktestCard` on
+the BOK tilt). The **same function** is run over 10 years of ^KS11 daily closes
+(`infrastructure/marketdata/history.py`, keyless Yahoo; NOTE `range=max` is
+broken on Yahoo for these indices) to measure **directional accuracy
+out-of-sample**: `GET /api/v1/backtest` returns hit rate, `naive = max(base_up,
+1-base_up)` base rate, and **skill** per horizon (D5/D20/D60), train/test split.
+Measured gains vs the old symmetric rule: held-out-3y D5 hit 53.4→57.7%, D20
+59.6→63.2%, coverage 86→100%, worst-regime composite −11.5→−3.4%p, with 2008/
+2022 bear-window hits kept ≥0.5. Honest framing: skill vs the post-hoc
+always-majority base rate stays slightly negative — the anchor's job is regime
+alignment, not oracle-beating. Visible via `TrendSignalCard` + `BacktestCard` on
 `/analysis` and `/prediction`.
 
 **BOK monetary policy — a core macro driver (ADR-024).** The prediction now treats

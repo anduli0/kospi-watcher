@@ -15,14 +15,17 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
+// Ordered by day-to-day importance: the forecast and the two actionable
+// screens (picks, position verdicts) first, context (market, news) next,
+// then meta/diagnostic screens (accuracy, agents, system) last.
 const NAV: { href: string; label: string; Icon: LucideIcon }[] = [
   { href: "/", label: "오늘", Icon: Home },
   { href: "/prediction", label: "예측", Icon: LineChart },
-  { href: "/accuracy", label: "정확도", Icon: GaugeCircle },
-  { href: "/market", label: "시장", Icon: BarChart3 },
-  { href: "/analysis", label: "포지션분석", Icon: Target },
   { href: "/stocks", label: "종목추천", Icon: Sparkles },
+  { href: "/analysis", label: "포지션분석", Icon: Target },
+  { href: "/market", label: "시장", Icon: BarChart3 },
   { href: "/news", label: "뉴스", Icon: Newspaper },
+  { href: "/accuracy", label: "정확도", Icon: GaugeCircle },
   { href: "/agents", label: "에이전트", Icon: Bot },
   { href: "/system", label: "시스템", Icon: Settings2 },
 ];

@@ -38,7 +38,10 @@ class BacktestService:
         cached = self._cache.get(symbol)
         if cached is not None and cached[0] > now:
             return cached[1]
-        closes = await fetch_daily_closes(symbol, rng="5y")
+        # 10y spans multiple regimes (2020 crash, 2022 bear, box + bull years),
+        # so the train/test verdict is regime-diverse. (range=max is broken on
+        # Yahoo for these indices — it returns ~1.5y; "10y" works.)
+        closes = await fetch_daily_closes(symbol, rng="10y")
         if len(closes) >= 200:
             source = "yahoo"
         else:  # offline / blocked — labelled deterministic fallback

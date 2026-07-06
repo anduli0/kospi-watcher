@@ -1,4 +1,10 @@
-"""Unit tests for the price-trend anchor + accuracy backtest (ADR-025)."""
+"""Unit tests for the price-trend anchor + accuracy backtest (ADR-025/029).
+
+The recalibrated signal is bullish-by-default: bearish requires a *confirmed*
+downtrend (clear -3% breach of the 100-day line + negative 60-day momentum +
+SMA50 < SMA200), and a >10% oversold breach returns to a weak default long
+(rebound zone) instead of chasing further downside.
+"""
 
 from __future__ import annotations
 
@@ -15,21 +21,31 @@ from kospi_watcher.domain.prediction.backtest import run_backtest
 from kospi_watcher.domain.prediction.synthesizer import synthesize
 from kospi_watcher.domain.prediction.trend_signal import (
     TREND_AGENT,
+    TREND_WARMUP,
     apply_trend_to_findings,
     build_trend_signal,
 )
 from kospi_watcher.domain.time import now_utc
 
 
-def _rising(n: int = 160) -> list[Decimal]:
-    return [Decimal(str(round(100 * (1.004 ** k), 2))) for k in range(n)]
+def _rising(n: int = 260) -> list[Decimal]:
+    return [Decimal(str(round(100 * (1.004**k), 4))) for k in range(n)]
 
 
-def _falling(n: int = 160) -> list[Decimal]:
-    return [Decimal(str(round(300 * (0.996 ** k), 2))) for k in range(n)]
+def _deep_fall(n: int = 260) -> list[Decimal]:
+    # Steady -0.4%/day: ends ~18% below the 100-day SMA — the oversold zone.
+    return [Decimal(str(round(300 * (0.996**k), 4))) for k in range(n)]
 
 
-def _flat(n: int = 160) -> list[Decimal]:
+def _confirmed_bear() -> list[Decimal]:
+    # 200 flat days, then 60 days of -0.15%/day: ~-6% below the 100-day SMA
+    # (inside the bear band), negative momentum, SMA50 < SMA200.
+    return [Decimal("100")] * 200 + [
+        Decimal(str(round(100 * (0.9985**k), 4))) for k in range(1, 61)
+    ]
+
+
+def _flat(n: int = 260) -> list[Decimal]:
     return [Decimal("100") for _ in range(n)]
 
 
@@ -42,10 +58,37 @@ def _finding(name: str, direction: MarketDirection = MarketDirection.NEUTRAL) ->
     )
 
 
-def test_build_trend_signal_directions() -> None:
-    assert build_trend_signal(_rising(), source="yahoo").direction is MarketDirection.BULLISH
-    assert build_trend_signal(_falling(), source="yahoo").direction is MarketDirection.BEARISH
-    assert build_trend_signal(_flat(), source="yahoo").direction is MarketDirection.NEUTRAL
+def test_uptrend_is_bullish() -> None:
+    s = build_trend_signal(_rising(), source="yahoo")
+    assert s.direction is MarketDirection.BULLISH
+    assert s.strength > 0.5  # clear trend = real conviction
+
+
+def test_confirmed_downtrend_is_bearish() -> None:
+    s = build_trend_signal(_confirmed_bear(), source="yahoo")
+    assert s.direction is MarketDirection.BEARISH
+    assert s.strength > 0.3
+    assert "하락추세 확인" in s.note
+
+
+def test_deep_oversold_returns_weak_default_long() -> None:
+    # >10% below the line = rebound-variance zone: no bear-chasing.
+    s = build_trend_signal(_deep_fall(), source="yahoo")
+    assert s.direction is MarketDirection.BULLISH
+    assert s.strength <= 0.2  # weak conviction, honestly labelled
+    assert "급락 구간" in s.note
+
+
+def test_flat_market_is_weak_default_long() -> None:
+    s = build_trend_signal(_flat(), source="yahoo")
+    assert s.direction is MarketDirection.BULLISH
+    assert s.strength <= 0.2
+
+
+def test_warmup_is_neutral() -> None:
+    s = build_trend_signal(_flat(TREND_WARMUP - 50), source="yahoo")
+    assert s.direction is MarketDirection.NEUTRAL
+    assert s.strength == 0.0
 
 
 def test_build_trend_signal_features() -> None:
@@ -58,15 +101,15 @@ def test_build_trend_signal_features() -> None:
 
 def test_apply_trend_overrides_technical_agent() -> None:
     findings = [_finding(TREND_AGENT), _finding("Korea Macro Agent")]
-    s = build_trend_signal(_rising(), source="yahoo")
+    s = build_trend_signal(_confirmed_bear(), source="yahoo")
     out = {f.agent_name: f for f in apply_trend_to_findings(findings, s)}
-    assert out[TREND_AGENT].direction is MarketDirection.BULLISH
+    assert out[TREND_AGENT].direction is MarketDirection.BEARISH
     assert out["Korea Macro Agent"].direction is MarketDirection.NEUTRAL  # untouched
 
 
 def test_apply_trend_noop_when_neutral() -> None:
     findings = [_finding(TREND_AGENT)]
-    s = build_trend_signal(_flat(), source="yahoo")
+    s = build_trend_signal(_flat(150), source="yahoo")  # warmup → NEUTRAL
     assert apply_trend_to_findings(findings, s) == findings
 
 
@@ -80,7 +123,7 @@ def test_strong_aligned_trend_raises_confidence() -> None:
 
 def test_backtest_report_shape() -> None:
     # A long, mostly-rising series → high base rate; report stays well-formed.
-    closes = _rising(500)
+    closes = _rising(600)
     rep = run_backtest(closes, symbol="KOSPI", source="yahoo", as_of=now_utc())
     assert len(rep.train) == 3 and len(rep.test) == 3
     assert rep.primary_horizon_days == 20

@@ -45,8 +45,10 @@ class PredictionAccuracyService:
         now = time.monotonic()
         if self._cache is not None and self._cache[0] > now:
             return self._cache[1]
-        dated = await fetch_daily_dated("KOSPI", rng="2y")
-        if len(dated) >= 200:
+        # 3y: the recalibrated signal warms up over 200 days, and the report
+        # still needs its ~250-day scoring window after that.
+        dated = await fetch_daily_dated("KOSPI", rng="3y")
+        if len(dated) >= 300:
             dates = [d for d, _ in dated]
             closes = [c for _, c in dated]
             source = "yahoo"

@@ -15,7 +15,7 @@ from decimal import Decimal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
-from kospi_watcher.domain.prediction.trend_signal import trend_core
+from kospi_watcher.domain.prediction.trend_signal import TREND_WARMUP, trend_core
 
 _HORIZONS: tuple[tuple[int, str], ...] = (
     (5, "단기 (D5, ~1주)"),
@@ -23,7 +23,7 @@ _HORIZONS: tuple[tuple[int, str], ...] = (
     (60, "장기 (D60, ~분기)"),
 )
 _PRIMARY = 20
-_WARMUP = 100  # need the 100-day SMA before the first signal
+_WARMUP = TREND_WARMUP  # the signal needs its 200-day structure SMA first
 
 
 class HorizonAccuracy(BaseModel):
