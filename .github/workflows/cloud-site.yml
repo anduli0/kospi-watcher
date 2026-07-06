@@ -45,7 +45,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'  # the package requires >=3.13 (pyproject)
 
       - uses: actions/setup-node@v4
         with:
