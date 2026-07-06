@@ -265,6 +265,29 @@ tests/                    # unit + integration (pytest, httpx ASGI)
 The dependency rule: **everything points inward at `domain`**; `domain` imports
 nothing app-specific (no FastAPI, no SQLAlchemy session, no I/O).
 
+## Two deployments: live PC + always-on cloud (ADR-030)
+
+There are **two** deployments of the same codebase:
+
+1. **Live PC** (Tailscale Funnel `…ts.net:8443` → `localhost:3100` → API `:18080`):
+   full interactivity — the live "지금 업데이트" button, worker Telegram at 08:00,
+   real-time quotes. Runs only while the PC is on. Unchanged by ADR-030.
+2. **Always-on cloud** — **https://anduli0.github.io/kospi-watcher/** — served by
+   GitHub Pages, rebuilt by `.github/workflows/cloud-site.yml` (cron: 07:20 KST
+   full Claude analysis via the `CLAUDE_CODE_OAUTH_TOKEN` repo secret; 13:00/20:00
+   deterministic refresh). PC-independent, mobile 24/7. It is a **static
+   snapshot**: `scripts/build_snapshot.py` runs the real pipeline in-process and
+   dumps every GET endpoint to `apps/web/public/snapshot/*.json`, and the web is
+   built with `NEXT_PUBLIC_STATIC_SNAPSHOT=1` (`lib/api.ts` reads the snapshot
+   files, mutations disabled, `output: "export"` under basePath `/kospi-watcher`).
+
+The static flag is off for the PC build, so both coexist. Repo `anduli0/kospi-watcher`
+is public; **no secrets are committed** (`.env` gitignored, token is an Actions
+secret only). ⚠️ Setup gotchas: GitHub Actions won't index workflows if the
+default branch has a slash (use `main`); the `github-pages` environment restricts
+deploys to the branch that was default when Pages was enabled (clear its
+`deployment_branch_policy`).
+
 ## Local development (dockerless mode)
 
 Windows PowerShell paths shown; the project targets Python **>=3.13** and is
