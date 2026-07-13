@@ -49,6 +49,14 @@ def _flat(n: int = 260) -> list[Decimal]:
     return [Decimal("100") for _ in range(n)]
 
 
+def _uptrend_then_crash() -> list[Decimal]:
+    # A healthy uptrend (well above the 100-day line), then a single -8% crash day
+    # — the slow structure is still bullish, so only a shock override can flip it.
+    closes = [Decimal(str(round(100 * (1.003**k), 4))) for k in range(260)]
+    closes.append(Decimal(str(round(float(closes[-1]) * 0.92, 4))))  # -8% in one session
+    return closes
+
+
 def _finding(name: str, direction: MarketDirection = MarketDirection.NEUTRAL) -> AgentFinding:
     t = now_utc()
     return AgentFinding(
@@ -69,6 +77,14 @@ def test_confirmed_downtrend_is_bearish() -> None:
     assert s.direction is MarketDirection.BEARISH
     assert s.strength > 0.3
     assert "하락추세 확인" in s.note
+
+
+def test_single_day_crash_flips_bearish() -> None:
+    # An 8% one-day crash must override the bullish-by-default structure.
+    s = build_trend_signal(_uptrend_then_crash(), source="yahoo")
+    assert s.direction is MarketDirection.BEARISH
+    assert s.strength >= 0.5  # decisive, not a coin flip
+    assert "급락" in s.note and "충격" in s.note
 
 
 def test_deep_oversold_returns_weak_default_long() -> None:

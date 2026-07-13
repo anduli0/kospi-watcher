@@ -81,3 +81,31 @@ realized D5 hit rate feeds `confidence_target`.
   box-market chop and stops chasing crash bottoms.
 * Warmup grew to 200 sessions — any consumer feeding shorter series gets
   NEUTRAL (and the mock/offline series were lengthened to compensate).
+
+## Amendment (2026-07-13) — acute-shock override
+
+The bull-default / slow-structure rule above is measured on *forward* horizons
+and keys entirely on 100/200-day averages, so it is deliberately slow: a single
+crash session barely moves the averages and satisfies none of the strict-bear
+conditions, leaving the anchor **bullish on a crash day**. That is correct for
+D20/D60 regime alignment but wrong as a *same-day market read* — an 8% KOSPI
+collapse must not display as strength.
+
+Added a **shock override**, checked *before* the strict-bear test and the
+oversold-rebound exemption, keyed on price **velocity** rather than level so it
+fires the moment the shock lands:
+
+* 1-day return ≤ **−3.5%**, OR 3-day cumulative return ≤ **−6%** → BEARISH,
+  strength `min(1, 10·|r1| + 4·|r3|)` floored at 0.5 (always HIGH-impact,
+  decisive at the Chief tilt). Thresholds ≈ a 2-sigma+ KOSPI daily move.
+* A dedicated note ("1일 X%·3일 Y% 급락 — 시장 충격/리스크오프 확인") replaces the
+  slow-structure wording, which would misdescribe a fresh crash still above its
+  100-day line.
+
+Because the same `trend_core` feeds `backtest`/`accuracy_track`, the override is
+also scored, not just displayed. Honest tradeoff: crash days are frequently
+followed by a technical bounce, so the forward-horizon hit on those specific
+sessions can suffer; the override optimises *same-day risk-off fidelity* (the
+reported failure — bullish on a −8% day) over next-day mean-reversion capture.
+The 29y walk-forward selection of the base rule was **not** re-run; the shock
+gate is an additive safety overlay, not a re-selected parameter.
