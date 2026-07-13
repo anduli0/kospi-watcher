@@ -44,6 +44,13 @@ _BEAR_BAND = Decimal("0.03")  # bear needs a clear -3% breach of the 100-day lin
 _OVERSOLD = Decimal("0.10")  # >10% below the line = rebound zone, no bear-chasing
 _DEFAULT_LONG_STRENGTH = 0.15  # conviction of an unconfirmed (default) long
 
+# Acute-shock override: a sharp *recent* drop is risk-off regardless of the slow
+# 100/200-day structure — a crash day must never read as strength. Keyed on price
+# velocity (1-day / 3-day return), not the level, so it fires the moment the shock
+# lands, before the slow averages can move. Thresholds ~ a 2-sigma+ KOSPI day.
+_SHOCK_1D = Decimal("-0.035")  # a single-day drop of 3.5%+ = acute risk-off shock
+_SHOCK_3D = Decimal("-0.06")  # a 3-day cumulative drop of 6%+ = sustained panic
+
 # The signal needs the 200-day structure SMA before its first call.
 TREND_WARMUP = _STRUCT_SLOW
 
@@ -84,6 +91,15 @@ def trend_core(
         return 0, 0.0, sma, mom
     dist = price / sma - Decimal("1")  # signed distance from the trend line
 
+    # Acute-shock override (checked first): a sharp recent drop is decisively
+    # risk-off — it must beat the bullish default AND the oversold-rebound
+    # exemption, because a *fresh* crash differs from being chronically oversold.
+    r1 = price / closes[i - 1] - Decimal("1")
+    r3 = price / closes[i - 3] - Decimal("1")
+    if r1 <= _SHOCK_1D or r3 <= _SHOCK_3D:
+        strength = min(1.0, float(abs(r1)) * 10.0 + float(abs(r3)) * 4.0)
+        return -1, max(strength, 0.5), sma, mom
+
     confirmed_bear = (
         -_OVERSOLD < dist < -_BEAR_BAND
         and mom < 0
@@ -123,7 +139,15 @@ def build_trend_signal(closes: Sequence[Decimal], *, source: str) -> TrendSignal
     mom_pct = _q2(mom * Decimal("100")) if mom is not None else None
     dist = (closes[i] / sma - Decimal("1")) if sma else Decimal("0")
     dist_pct = _q2(dist * Decimal("100"))
-    if direction is MarketDirection.BEARISH:
+    r1_pct = _q2((closes[i] / closes[i - 1] - Decimal("1")) * Decimal("100"))
+    r3_pct = _q2((closes[i] / closes[i - 3] - Decimal("1")) * Decimal("100"))
+    is_shock = r1_pct <= _SHOCK_1D * 100 or r3_pct <= _SHOCK_3D * 100
+    if direction is MarketDirection.BEARISH and is_shock:
+        note = (
+            f"1일 {r1_pct}%·3일 {r3_pct}% 급락 — 시장 충격/리스크오프 확인, "
+            f"방어적 하락 전환 (강도 {strength:.0%})."
+        )
+    elif direction is MarketDirection.BEARISH:
         note = (
             f"100일선을 {abs(dist_pct)}% 이탈·60일 흐름 {mom_pct}%·"
             f"50일선<200일선(추세 구조 훼손) — 하락추세 확인 (강도 {strength:.0%})."
