@@ -82,30 +82,41 @@ realized D5 hit rate feeds `confidence_target`.
 * Warmup grew to 200 sessions — any consumer feeding shorter series gets
   NEUTRAL (and the mock/offline series were lengthened to compensate).
 
-## Amendment (2026-07-13) — acute-shock override
+## Amendment (2026-07-14) — velocity-based risk-off override
 
 The bull-default / slow-structure rule above is measured on *forward* horizons
-and keys entirely on 100/200-day averages, so it is deliberately slow: a single
-crash session barely moves the averages and satisfies none of the strict-bear
-conditions, leaving the anchor **bullish on a crash day**. That is correct for
-D20/D60 regime alignment but wrong as a *same-day market read* — an 8% KOSPI
-collapse must not display as strength.
+and keys entirely on 100/200-day averages, so it is deliberately slow. Two ways
+it left the anchor **bullish during a violent selloff**, seen live on the
+2026-07 KOSPI crash (8088 → 6728, **−17% in a week / −23% in 20 sessions**):
 
-Added a **shock override**, checked *before* the strict-bear test and the
-oversold-rebound exemption, keyed on price **velocity** rather than level so it
-fires the moment the shock lands:
+1. A single crash session barely moves the 100-day line and trips none of the
+   strict-bear conditions → bullish on the −8.95% crash day (07-13).
+2. After a huge prior run-up, 60-day momentum stays **positive off the low base**
+   and price is still near/above the (lagging) 100-day line, so even a −20% month
+   fails the strict-bear gate → bullish *through* the ongoing crash (07-14).
 
-* 1-day return ≤ **−3.5%**, OR 3-day cumulative return ≤ **−6%** → BEARISH,
-  strength `min(1, 10·|r1| + 4·|r3|)` floored at 0.5 (always HIGH-impact,
-  decisive at the Chief tilt). Thresholds ≈ a 2-sigma+ KOSPI daily move.
-* A dedicated note ("1일 X%·3일 Y% 급락 — 시장 충격/리스크오프 확인") replaces the
-  slow-structure wording, which would misdescribe a fresh crash still above its
-  100-day line.
+Added a **risk-off override**, checked *before* the strict-bear test and the
+oversold-rebound exemption. It is keyed on price **velocity**, not drawdown level
+— ADR-029 found chasing a *slow, deep* decline (mean-reversion zone) is
+negative-value, so a quiet grind stays default-long; only an **active** selloff
+is risk-off. → BEARISH when ANY of:
+
+* 1-day return ≤ **−3.5%** (acute shock), OR
+* 3-day cumulative ≤ **−6%** (panic), OR
+* 20-day (≈1-month) return ≤ **−10%** (active correction/crash) — this leg is
+  what keeps the call risk-off through the *whole* selloff, not just the 3-day
+  shock window, and it catches case 2 (positive momentum, −20% month).
+
+Strength `min(1, 5·severity)` floored at 0.5, where severity is the worst of the
+recent returns and the 60-day drawdown (drawdown feeds strength/context only, not
+the trigger). A dedicated note ("1일 X%·1주 Y%·1개월 Z%·고점대비 D% — 시장 급락/
+리스크오프 확인") replaces the slow-structure wording.
 
 Because the same `trend_core` feeds `backtest`/`accuracy_track`, the override is
 also scored, not just displayed. Honest tradeoff: crash days are frequently
 followed by a technical bounce, so the forward-horizon hit on those specific
-sessions can suffer; the override optimises *same-day risk-off fidelity* (the
-reported failure — bullish on a −8% day) over next-day mean-reversion capture.
-The 29y walk-forward selection of the base rule was **not** re-run; the shock
-gate is an additive safety overlay, not a re-selected parameter.
+sessions can suffer; the override optimises *live risk-off fidelity* (the reported
+failure — 강세 during a −17% week) over next-day mean-reversion capture. The 29y
+walk-forward selection of the base rule was **not** re-run; the risk-off gate is
+an additive safety overlay whose triggers were deliberately kept velocity-based to
+avoid contradicting ADR-029's mean-reversion finding.

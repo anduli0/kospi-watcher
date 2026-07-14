@@ -44,12 +44,22 @@ _BEAR_BAND = Decimal("0.03")  # bear needs a clear -3% breach of the 100-day lin
 _OVERSOLD = Decimal("0.10")  # >10% below the line = rebound zone, no bear-chasing
 _DEFAULT_LONG_STRENGTH = 0.15  # conviction of an unconfirmed (default) long
 
-# Acute-shock override: a sharp *recent* drop is risk-off regardless of the slow
-# 100/200-day structure — a crash day must never read as strength. Keyed on price
-# velocity (1-day / 3-day return), not the level, so it fires the moment the shock
-# lands, before the slow averages can move. Thresholds ~ a 2-sigma+ KOSPI day.
+# Risk-off override: a sharp drop OR a sustained decline OR a deep drawdown is
+# risk-off regardless of the slow 100/200-day structure — a violent selloff must
+# never read as strength even while the long-run averages (and +momentum off a low
+# base) still look benign. Keyed on price *velocity* and *drawdown*, not the level,
+# so it fires while the slow averages still lag. Shock thresholds ~ a 2-sigma+ day;
+# the decline/drawdown legs keep the call risk-off through the whole selloff, not
+# just the 3-day shock window.
+# Triggers are *velocity*-based (recent-drop speed), NOT drawdown level: ADR-029
+# found chasing a slow, deep decline (mean-reversion zone) is negative-value, so a
+# quiet grind stays default-long — only an *active* selloff is risk-off. Drawdown
+# off the 60-day high is computed for context/strength, but is not itself a trigger.
 _SHOCK_1D = Decimal("-0.035")  # a single-day drop of 3.5%+ = acute risk-off shock
 _SHOCK_3D = Decimal("-0.06")  # a 3-day cumulative drop of 6%+ = sustained panic
+_DECLINE_LB = 20  # ~1 trading month
+_DECLINE_20D = Decimal("-0.10")  # a 10%+ drop over ~1 month = active correction/crash
+_DRAWDOWN_LB = 60  # ~3 trading months = the recent-high window (context/strength)
 
 # The signal needs the 200-day structure SMA before its first call.
 TREND_WARMUP = _STRUCT_SLOW
@@ -76,6 +86,20 @@ def _sma(closes: Sequence[Decimal], i: int, w: int) -> Decimal:
     return sum(closes[i - w + 1 : i + 1], Decimal("0")) / Decimal(w)
 
 
+def _riskoff(
+    closes: Sequence[Decimal], i: int
+) -> tuple[Decimal, Decimal, Decimal, Decimal, bool]:
+    """Risk-off metrics at ``i``: 1-day, 3-day, 20-day returns, drawdown off the
+    60-day high, and the risk-off flag (any threshold breached). Past-only."""
+    r1 = closes[i] / closes[i - 1] - Decimal("1")
+    r3 = closes[i] / closes[i - 3] - Decimal("1")
+    r20 = closes[i] / closes[i - _DECLINE_LB] - Decimal("1")
+    hi = max(closes[i - _DRAWDOWN_LB : i + 1])
+    dd = (closes[i] / hi - Decimal("1")) if hi else Decimal("0")
+    flag = r1 <= _SHOCK_1D or r3 <= _SHOCK_3D or r20 <= _DECLINE_20D
+    return r1, r3, r20, dd, flag
+
+
 def trend_core(
     closes: Sequence[Decimal], i: int
 ) -> tuple[int, float, Decimal | None, Decimal | None]:
@@ -91,13 +115,16 @@ def trend_core(
         return 0, 0.0, sma, mom
     dist = price / sma - Decimal("1")  # signed distance from the trend line
 
-    # Acute-shock override (checked first): a sharp recent drop is decisively
-    # risk-off — it must beat the bullish default AND the oversold-rebound
-    # exemption, because a *fresh* crash differs from being chronically oversold.
-    r1 = price / closes[i - 1] - Decimal("1")
-    r3 = price / closes[i - 3] - Decimal("1")
-    if r1 <= _SHOCK_1D or r3 <= _SHOCK_3D:
-        strength = min(1.0, float(abs(r1)) * 10.0 + float(abs(r3)) * 4.0)
+    # Risk-off override (checked first): an acute shock OR a sustained ~1-month
+    # decline OR a deep drawdown off the recent high is decisively risk-off — it
+    # must beat the bullish default AND the oversold-rebound exemption, because a
+    # violent selloff differs from being chronically, quietly oversold. This is
+    # what keeps a -20%-in-a-month crash from reading as strength while the slow
+    # 100-day line and the (low-base) 60-day momentum still look benign.
+    r1, r3, r20, dd, riskoff = _riskoff(closes, i)
+    if riskoff:
+        sev = max(-min(r1, r3, r20), -dd, Decimal("0"))
+        strength = min(1.0, float(sev) * 5.0)
         return -1, max(strength, 0.5), sma, mom
 
     confirmed_bear = (
@@ -139,13 +166,15 @@ def build_trend_signal(closes: Sequence[Decimal], *, source: str) -> TrendSignal
     mom_pct = _q2(mom * Decimal("100")) if mom is not None else None
     dist = (closes[i] / sma - Decimal("1")) if sma else Decimal("0")
     dist_pct = _q2(dist * Decimal("100"))
-    r1_pct = _q2((closes[i] / closes[i - 1] - Decimal("1")) * Decimal("100"))
-    r3_pct = _q2((closes[i] / closes[i - 3] - Decimal("1")) * Decimal("100"))
-    is_shock = r1_pct <= _SHOCK_1D * 100 or r3_pct <= _SHOCK_3D * 100
-    if direction is MarketDirection.BEARISH and is_shock:
+    r1, _r3, r20, dd, riskoff = _riskoff(closes, i)
+    r1_pct = _q2(r1 * Decimal("100"))
+    r5_pct = _q2((closes[i] / closes[i - 5] - Decimal("1")) * Decimal("100"))
+    r20_pct = _q2(r20 * Decimal("100"))
+    dd_pct = _q2(dd * Decimal("100"))
+    if direction is MarketDirection.BEARISH and riskoff:
         note = (
-            f"1일 {r1_pct}%·3일 {r3_pct}% 급락 — 시장 충격/리스크오프 확인, "
-            f"방어적 하락 전환 (강도 {strength:.0%})."
+            f"1일 {r1_pct}%·1주 {r5_pct}%·1개월 {r20_pct}%·고점대비 {dd_pct}% — "
+            f"시장 급락/리스크오프 확인, 방어적 하락 (강도 {strength:.0%})."
         )
     elif direction is MarketDirection.BEARISH:
         note = (
