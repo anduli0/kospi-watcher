@@ -57,6 +57,16 @@ def _uptrend_then_crash() -> list[Decimal]:
     return closes
 
 
+def _steep_runup_then_selloff() -> list[Decimal]:
+    # Steep run-up (so 60-day momentum stays POSITIVE and the 100-day line lags
+    # far below), then ~1 month of -1.2%/day: no single shock day (r1>-3.5%,
+    # r3>-6%) but a -20%+ month — only the sustained-decline leg can flip this.
+    up = [Decimal(str(round(100 * (1.012**k), 4))) for k in range(240)]
+    last = float(up[-1])
+    down = [Decimal(str(round(last * (0.988**k), 4))) for k in range(1, 25)]
+    return up + down
+
+
 def _finding(name: str, direction: MarketDirection = MarketDirection.NEUTRAL) -> AgentFinding:
     t = now_utc()
     return AgentFinding(
@@ -84,7 +94,19 @@ def test_single_day_crash_flips_bearish() -> None:
     s = build_trend_signal(_uptrend_then_crash(), source="yahoo")
     assert s.direction is MarketDirection.BEARISH
     assert s.strength >= 0.5  # decisive, not a coin flip
-    assert "급락" in s.note and "충격" in s.note
+    assert "급락" in s.note and "리스크오프" in s.note
+
+
+def test_sustained_decline_flips_bearish_despite_positive_momentum() -> None:
+    # A -20%+ month with NO single crash day (and still-positive 60-day momentum
+    # off a low base) must read risk-off — the case that showed 강세 on the real
+    # 2026-07 selloff before the sustained-decline leg was added.
+    closes = _steep_runup_then_selloff()
+    s = build_trend_signal(closes, source="yahoo")
+    assert s.mom60_pct is not None and s.mom60_pct > 0  # momentum still looks benign
+    assert s.direction is MarketDirection.BEARISH  # ...but the month is a crash
+    assert s.strength >= 0.5
+    assert "1개월" in s.note
 
 
 def test_deep_oversold_returns_weak_default_long() -> None:
