@@ -123,6 +123,31 @@ async def _main() -> int:
             except Exception as exc:
                 print(f"[snapshot] WARN {name}: {exc}", flush=True)
 
+        # 2b) API-shaped mirror (extensionless files under snapshot/api/...):
+        # external consumers — e.g. the MARKET watcher's serverless build — point
+        # their KOSPI_WATCHER_BASE_URL at .../kospi-watcher/snapshot and reuse the
+        # exact live-API paths with zero adapter changes.
+        for url in (
+            "/health",
+            "/api/v1/prediction/latest",
+            "/api/v1/accuracy/track",
+            "/api/v1/news/brief",
+            "/api/v1/brief",
+            "/api/v1/agents/org",
+        ):
+            try:
+                resp = await client.get(url, timeout=600.0)
+                resp.raise_for_status()
+                path = OUT_DIR / url.lstrip("/")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    json.dumps(resp.json(), ensure_ascii=False, separators=(",", ":")),
+                    encoding="utf-8",
+                )
+                print(f"[snapshot] api-mirror {url}", flush=True)
+            except Exception as exc:
+                print(f"[snapshot] WARN api-mirror {url}: {exc}", flush=True)
+
         # 3) Per-date news files (for the /news date picker).
         try:
             dates_resp = await client.get("/api/v1/news/dates", timeout=120.0)
