@@ -44,6 +44,10 @@ from kospi_watcher.domain.prediction.schemas import (
     MarketPrediction,
     Scenario,
 )
+from kospi_watcher.domain.prediction.semiconductor import (
+    SemiconductorSignal,
+    SemiCycleStance,
+)
 from kospi_watcher.domain.prediction.trend_signal import TrendSignal
 from kospi_watcher.domain.time import now_utc
 
@@ -270,6 +274,7 @@ def synthesize(
     agent_count: int = 21,
     news_headlines: Sequence[str] | None = None,
     monetary_policy: MonetaryPolicySignal | None = None,
+    semiconductor: SemiconductorSignal | None = None,
     trend_signal: TrendSignal | None = None,
     calibration: Calibration | None = None,
 ) -> MarketPrediction:
@@ -283,9 +288,14 @@ def synthesize(
 
     overall_score = sum(v.weight * v.score for v in desk_views)
     # The real price trend is the PRIMARY directional anchor (the prediction must
-    # not fight the market), and BOK monetary policy is a core risk tilt on top of
-    # it (ADR-025 / ADR-024). Both adjust the desk-weighted score at the Chief level.
-    overall_score += _trend_tilt(trend_signal) + _policy_tilt(monetary_policy)
+    # not fight the market); BOK monetary policy and the semiconductor mega-cap cycle
+    # (index leadership ~1/3 of cap) are core tilts on top of it (ADR-025 / ADR-024 /
+    # ADR-031). All adjust the desk-weighted score at the Chief level.
+    overall_score += (
+        _trend_tilt(trend_signal)
+        + _policy_tilt(monetary_policy)
+        + _semi_tilt(semiconductor)
+    )
     # Auto-feedback: the calibration learned from scoring past predictions nudges
     # the direction toward the realized drift (ADR-027).
     if calibration is not None:
@@ -340,6 +350,7 @@ def synthesize(
         news_refs,
         trend_signal,
         monetary_policy,
+        semiconductor,
         scenarios,
     )
 
@@ -366,6 +377,7 @@ def synthesize(
         desk_views=desk_views,
         deliberation=deliberation,
         monetary_policy=monetary_policy,
+        semiconductor=semiconductor,
         trend_signal=trend_signal,
         calibration=calibration,
         instrument_stances=stances,
@@ -406,13 +418,20 @@ def _confidence(
     ):
         conf += 0.12 * trend_signal.strength  # strong aligned trend = real conviction
     conf = min(0.95, conf)
-    # Reliability anchor: blend toward the realized hit rate for a clear call.
-    if (
-        calibration is not None
-        and calibration.confidence_target >= 0.5
-        and direction is not MarketDirection.NEUTRAL
-    ):
-        conf = 0.6 * conf + 0.4 * calibration.confidence_target
+    # Reliability anchor: blend toward the realized hit rate FOR THIS DIRECTION
+    # (bull calls anchor to the bull-call record, bear to bear — the by-direction
+    # error results), then FLOOR at it — a call that is empirically right ~60% of
+    # the time must never be reported below that rate (< 50% would misread as a
+    # coin flip).
+    if calibration is not None and direction is not MarketDirection.NEUTRAL:
+        target = (
+            calibration.bull_target
+            if direction is MarketDirection.BULLISH
+            else calibration.bear_target
+        ) or calibration.confidence_target
+        if target >= 0.5:
+            conf = 0.6 * conf + 0.4 * target
+            conf = max(conf, target)
     return round(min(0.95, conf), 2)
 
 
@@ -440,6 +459,30 @@ def _policy_tilt(mp: MonetaryPolicySignal | None) -> float:
     return _DIR_SIGN[mp.equity_bias] * magnitude
 
 
+def _semi_tilt(semi: SemiconductorSignal | None) -> float:
+    """Signed house-level tilt from the semiconductor cycle (downcycle < 0, up > 0).
+
+    Samsung + SK hynix are ~1/3 of the index and its directional leadership, so a
+    confident cycle read is a core tilt — strong enough to turn the house view
+    defensive when the leaders roll over even while the slow index averages still
+    point up (the rollover the trend anchor is too lagged to see, ADR-031).
+
+    Sized proportionally to *how severe* the leadership move is: a ~1-month leader
+    drawdown of -5% only nudges (a mild move should not override the trend anchor),
+    but a -13%+ collapse (a genuine cycle break that is itself driving the index)
+    is decisive enough to flip the house view defensive. Capped so it can't fully
+    saturate the score. A config-override read (no momentum) is treated as a
+    high-conviction manual call and sized to be decisive."""
+    if semi is None or semi.stance is SemiCycleStance.NEUTRAL:
+        return 0.0
+    if semi.blended_mom_pct is not None:
+        severity = abs(float(semi.blended_mom_pct)) / 100.0  # 1-month leader move
+        magnitude = min(0.45, 0.14 + severity * 1.7)
+    else:
+        magnitude = min(0.45, semi.confidence * 0.50)
+    return _DIR_SIGN[semi.equity_bias] * magnitude
+
+
 def _policy_clause(mp: MonetaryPolicySignal) -> str:
     stance_ko = {
         PolicyStance.HAWKISH: "매파(긴축)",
@@ -453,6 +496,25 @@ def _policy_clause(mp: MonetaryPolicySignal) -> str:
     return (
         f"한국은행 통화정책은 {stance_ko} 기조로,{path} 코스피에 {bias_ko} 압력으로 "
         f"작용한다는 점도 핵심 거시 변수로 반영했습니다."
+    )
+
+
+def _semi_clause(semi: SemiconductorSignal) -> str:
+    stance_ko = {
+        SemiCycleStance.EXPANSION: "상승(업사이클)",
+        SemiCycleStance.DOWNCYCLE: "하강(끝물)",
+        SemiCycleStance.NEUTRAL: "중립",
+    }[semi.stance]
+    mom = (
+        f" 최근 1개월 대장주 흐름 {semi.blended_mom_pct}%,"
+        if semi.blended_mom_pct is not None
+        else ""
+    )
+    bias_ko = _DIR_KO[semi.equity_bias]
+    return (
+        f"코스피 시총 약 1/3을 차지하는 삼성전자·SK하이닉스 반도체 메모리 사이클이 "
+        f"{stance_ko} 국면으로,{mom} 지수에 {bias_ko} 압력으로 작용한다는 점을 "
+        "핵심 동인으로 반영했습니다."
     )
 
 
@@ -484,6 +546,7 @@ def _brief(
     news_refs: list[str],
     trend_signal: TrendSignal | None,
     monetary_policy: MonetaryPolicySignal | None,
+    semiconductor: SemiconductorSignal | None,
     scenarios: list[Scenario],
 ) -> str:
     """A structured, analyst-style note: 총평 → 핵심 동인 → 리스크 → 대응 전략 →
@@ -515,6 +578,8 @@ def _brief(
         f"분석에서는 {lead.title}가 {_DIR_KO[lead.lean]} 신호를 주도했는데, "
         f"'{lead_driver}'가 핵심 논거입니다."
     )
+    if semiconductor is not None and semiconductor.stance is not SemiCycleStance.NEUTRAL:
+        drivers.append(_semi_clause(semiconductor))
     if monetary_policy is not None and monetary_policy.stance is not PolicyStance.NEUTRAL:
         drivers.append(_policy_clause(monetary_policy))
     else:

@@ -47,8 +47,13 @@ would return.
 **Workflow.** `.github/workflows/cloud-site.yml` (cron + `workflow_dispatch`):
 - 07:20 KST → `AGENT_RUNTIME=claude_cli`: the daily analysis, 21 agents on the
   subscription via `claude -p` (token from the `CLAUDE_CODE_OAUTH_TOKEN` secret).
-- 13:00 / 20:00 KST → `AGENT_RUNTIME=mock`: cheap deterministic refresh (no
-  subscription spend) to keep prices/news current.
+- 09:00–15:30 KST weekdays, every 30 min (+ 15:40 close print) →
+  `AGENT_RUNTIME=mock`: market-hours refresh so prices/prediction stay near-live
+  while KRX trades. Free (public-repo Actions minutes), no subscription spend;
+  GitHub cron can lag a few minutes, so effective staleness is ~30–40 min worst
+  case. The runtime gate is `hour < 8` (07:20 slot only) so these never trigger
+  the full Claude analysis.
+- 13:00 KST weekends / 20:00 KST daily → `AGENT_RUNTIME=mock`: off-hours refresh.
 - `workflow_dispatch` → full Claude analysis.
 Each run builds the snapshot, static-exports the web, and deploys to Pages via
 `actions/deploy-pages`.

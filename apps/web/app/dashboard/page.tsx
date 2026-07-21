@@ -79,7 +79,8 @@ export default function DashboardPage() {
               <ErrorNote error={audit.error} />
             </div>
           ) : audit.data && audit.data.items.length > 0 ? (
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[32rem] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-muted">
                   <th className="px-4 py-2 font-medium">Action</th>
@@ -99,6 +100,7 @@ export default function DashboardPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           ) : (
             <p className="p-5 text-sm text-muted">아직 기록된 감사 로그가 없습니다.</p>
           )}

@@ -319,8 +319,8 @@ export default function PredictionPage() {
               title="종목 포지셔닝"
               desc="지수 전망을 ETF별 포지션으로 옮긴 것입니다. 비중확대=적극, 중립=관망, 비중축소·회피=피하기. 참고용이며 주문 권한은 없습니다."
             />
-            <div className="card p-0">
-              <table className="w-full text-sm">
+            <div className="card overflow-x-auto p-0">
+              <table className="w-full min-w-[36rem] text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-muted">
                     <th className="px-4 py-2.5 font-medium">종목</th>

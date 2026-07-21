@@ -306,6 +306,8 @@ export interface AccuracyScore {
 export interface Calibration {
   direction_bias: number;
   confidence_target: number; // realized hit rate the confidence is anchored to
+  bull_target?: number; // realized bull-call hit rate (per-direction anchor)
+  bear_target?: number; // realized bear-call hit rate
   grade: string;
   basis: string;
 }

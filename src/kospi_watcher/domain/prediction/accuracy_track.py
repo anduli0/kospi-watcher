@@ -65,6 +65,11 @@ class Calibration(BaseModel):
     direction_bias: float  # added to the house score (toward the realized drift)
     confidence_target: float  # the realized directional hit rate the confidence
     #                           should be calibrated toward (0 = no history)
+    # Per-direction reliability: a bull call anchors to how bull calls actually
+    # scored, a bear call to bear calls — the error results by direction, not
+    # just the pooled average (0 = insufficient per-direction sample).
+    bull_target: float = 0.0
+    bear_target: float = 0.0
     grade: str  # honest letter grade
     basis: str  # Korean explanation of what was learned
 
@@ -201,6 +206,18 @@ def _calibrate(score: AccuracyScore, up_frac: float) -> Calibration:
     # hit rate: if the model is directionally right ~70% of the time, a clear call
     # deserves ~70% confidence (not 50%). The synthesizer anchors toward this.
     confidence_target = round(score.hit_rate, 3) if score.samples >= 20 else 0.0
+    # Direction-conditional targets: fall back to the pooled rate when the
+    # per-direction sample is too thin to trust.
+    bull_target = (
+        round(score.bull_hit, 3)
+        if score.bull_hit is not None and score.bull_samples >= 15
+        else confidence_target
+    )
+    bear_target = (
+        round(score.bear_hit, 3)
+        if score.bear_hit is not None and score.bear_samples >= 15
+        else confidence_target
+    )
 
     if score.skill >= 0.02:
         grade = "B+ (기저율 상회)"
@@ -215,12 +232,15 @@ def _calibrate(score: AccuracyScore, up_frac: float) -> Calibration:
     basis = (
         f"최근 {score.samples}회 채점: 방향 적중률 {score.hit_rate:.0%}"
         f"(기저율 {score.base_rate:.0%}). 지속 추세에 정합하도록 "
-        f"방향 보정 {direction_bias:+.3f}({bias_ko} 쪽), 확신도를 실현 적중률 "
-        f"{confidence_target:.0%}에 정합(과신/과소 교정)하도록 다음 예측에 자동 반영."
+        f"방향 보정 {direction_bias:+.3f}({bias_ko} 쪽), 확신도를 방향별 실현 적중률"
+        f"(상승콜 {bull_target:.0%}·하락콜 {bear_target:.0%}, 전체 {confidence_target:.0%})에 "
+        "정합(과신/과소 교정)하도록 다음 예측에 자동 반영."
     )
     return Calibration(
         direction_bias=round(direction_bias, 4),
         confidence_target=confidence_target,
+        bull_target=bull_target,
+        bear_target=bear_target,
         grade=grade,
         basis=basis,
     )

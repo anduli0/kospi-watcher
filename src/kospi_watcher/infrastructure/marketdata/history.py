@@ -24,6 +24,8 @@ _HIST_SYMBOL: dict[str, str] = {
     "KOSPI": "^KS11",
     "069500": "069500.KS",
     "229200": "229200.KS",
+    "005930": "005930.KS",  # 삼성전자 — semiconductor mega-cap leader (ADR-031)
+    "000660": "000660.KS",  # SK하이닉스 — memory play (ADR-031)
 }
 
 
