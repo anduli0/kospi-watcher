@@ -14,6 +14,7 @@ from kospi_watcher.domain.enums import (
 )
 from kospi_watcher.domain.prediction.accuracy_track import Calibration
 from kospi_watcher.domain.prediction.monetary_policy import MonetaryPolicySignal
+from kospi_watcher.domain.prediction.semiconductor import SemiconductorSignal
 from kospi_watcher.domain.prediction.trend_signal import TrendSignal
 
 PREDICTION_SCHEMA_VERSION = "1.0.0"
@@ -124,6 +125,7 @@ class MarketPrediction(BaseModel):
     desk_views: list[DeskView] = Field(default_factory=list)
     deliberation: Deliberation | None = None
     monetary_policy: MonetaryPolicySignal | None = None
+    semiconductor: SemiconductorSignal | None = None
     trend_signal: TrendSignal | None = None
     calibration: Calibration | None = None
     instrument_stances: list[InstrumentStance] = Field(default_factory=list)

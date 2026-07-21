@@ -148,6 +148,10 @@ export default function AccuracyPage() {
                 label="확신도 목표 (실현 적중률 정합)"
                 value={r.calibration.confidence_target > 0 ? `${(r.calibration.confidence_target * 100).toFixed(0)}%` : "—"}
               />
+              <Stat
+                label="방향별 확신도 앵커 (상승콜/하락콜)"
+                value={`${r.calibration.bull_target ? (r.calibration.bull_target * 100).toFixed(0) + "%" : "—"} / ${r.calibration.bear_target ? (r.calibration.bear_target * 100).toFixed(0) + "%" : "—"}`}
+              />
             </div>
             <p className="mt-3 text-xs leading-relaxed text-foreground/90">{r.calibration.basis}</p>
             <p className="mt-2 text-[11px] leading-relaxed text-muted">

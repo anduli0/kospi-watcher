@@ -121,8 +121,8 @@ export default function RiskPage() {
                 )}
                 <span className="text-xs text-muted">{decision.reason}</span>
               </div>
-              <div className="overflow-hidden rounded-md border border-border">
-                <table className="w-full text-sm">
+              <div className="overflow-x-auto rounded-md border border-border">
+                <table className="w-full min-w-[28rem] text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-xs text-muted">
                       <th className="px-3 py-2 font-medium">Check</th>

@@ -25,6 +25,15 @@
     scroll-behavior: smooth;
   }
 
+  /* Mobile: the page itself must never pan/overflow horizontally — wide content
+     (tables, charts) scrolls inside its own container instead. */
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+  }
+
   html,
   body {
     font-family: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
@@ -39,6 +48,9 @@
       radial-gradient(50rem 50rem at -10% 10%, hsl(var(--accent-2) / 0.05), transparent 55%);
     background-attachment: fixed;
     color: hsl(var(--foreground));
+    /* Long unbroken tokens (URLs, tickers, English headlines) wrap instead of
+       pushing the layout past the viewport. */
+    overflow-wrap: break-word;
     font-feature-settings: "ss01", "cv01", "tnum";
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;

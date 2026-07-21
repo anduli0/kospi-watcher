@@ -104,6 +104,11 @@ class Settings(BaseSettings):
     # Net expected 25bp moves in 2026 (used when the stance is set manually;
     # positive = hikes, negative = cuts).
     monetary_policy_hikes_2026: int = 0
+
+    # --- Semiconductor mega-cap cycle — a core index driver (ADR-031) ---
+    # "auto" = derive the cycle from Samsung/SK hynix 1-month price momentum; or set
+    # an authoritative stance: "expansion" | "neutral" | "downcycle".
+    semiconductor_cycle_stance: str = "auto"
     market_data_user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"

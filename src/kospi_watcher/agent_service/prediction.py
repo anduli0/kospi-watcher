@@ -8,6 +8,9 @@ hands them to the pure hierarchical synthesizer.
 from __future__ import annotations
 
 from kospi_watcher.agent_service.accuracy_service import get_accuracy_service
+from kospi_watcher.agent_service.semiconductor_service import (
+    get_semiconductor_service,
+)
 from kospi_watcher.agent_service.service import AgentService
 from kospi_watcher.agent_service.trend_service import get_trend_service
 from kospi_watcher.config import get_settings
@@ -17,6 +20,9 @@ from kospi_watcher.domain.prediction.monetary_policy import (
     build_signal,
 )
 from kospi_watcher.domain.prediction.schemas import MarketPrediction
+from kospi_watcher.domain.prediction.semiconductor import (
+    apply_to_findings as apply_semi_to_findings,
+)
 from kospi_watcher.domain.prediction.synthesizer import synthesize
 from kospi_watcher.domain.prediction.trend_signal import apply_trend_to_findings
 
@@ -47,15 +53,18 @@ class PredictionService:
         # the auto-feedback calibration learned from scoring past predictions.
         trend = await get_trend_service().latest()
         policy = self._policy_signal(news_headlines)
+        semiconductor = await get_semiconductor_service().latest()
         calibration = await get_accuracy_service().calibration()
         findings = apply_trend_to_findings(findings, trend)
         findings = apply_to_findings(findings, policy)
+        findings = apply_semi_to_findings(findings, semiconductor)
         return synthesize(
             findings,
             generated_by=self._agents.runtime_name,
             agent_count=len(runs),
             news_headlines=news_headlines,
             monetary_policy=policy,
+            semiconductor=semiconductor,
             trend_signal=trend,
             calibration=calibration,
         )

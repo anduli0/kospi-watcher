@@ -274,8 +274,11 @@ There are **two** deployments of the same codebase:
    real-time quotes. Runs only while the PC is on. Unchanged by ADR-030.
 2. **Always-on cloud** — **https://anduli0.github.io/kospi-watcher/** — served by
    GitHub Pages, rebuilt by `.github/workflows/cloud-site.yml` (cron: 07:20 KST
-   full Claude analysis via the `CLAUDE_CODE_OAUTH_TOKEN` repo secret; 13:00/20:00
-   deterministic refresh). PC-independent, mobile 24/7. It is a **static
+   full Claude analysis via the `CLAUDE_CODE_OAUTH_TOKEN` repo secret; **market
+   hours 09:00–15:30 KST weekdays every 30 min** + 15:40 close + 20:00 (and 13:00
+   weekends) deterministic refresh — free Actions minutes on the public repo, no
+   Claude spend; the full-analysis gate is `hour < 8` so intraday runs stay
+   deterministic). PC-independent, mobile 24/7. It is a **static
    snapshot**: `scripts/build_snapshot.py` runs the real pipeline in-process and
    dumps every GET endpoint to `apps/web/public/snapshot/*.json`, and the web is
    built with `NEXT_PUBLIC_STATIC_SNAPSHOT=1` (`lib/api.ts` reads the snapshot

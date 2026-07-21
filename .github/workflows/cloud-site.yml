@@ -12,9 +12,15 @@ name: cloud-site
 
 on:
   schedule:
-    - cron: '20 22 * * *'   # 07:20 KST — daily Claude analysis (full)
-    - cron: '0 4 * * *'     # 13:00 KST — deterministic refresh
-    - cron: '0 11 * * *'    # 20:00 KST — deterministic refresh
+    - cron: '20 22 * * *'      # 07:20 KST — daily Claude analysis (full)
+    # KRX market hours (09:00–15:30 KST = 00:00–06:30 UTC, Mon–Fri): refresh
+    # every 30 min so prices/prediction stay near-live while the market trades.
+    # Deterministic runtime — free Actions minutes (public repo), no Claude spend.
+    # (GitHub cron can lag a few minutes under load; cadence is ~30–40 min worst case.)
+    - cron: '*/30 0-6 * * 1-5' # 09:00–15:30 KST weekdays — market-hours refresh
+    - cron: '40 6 * * 1-5'     # 15:40 KST weekdays — closing-price refresh
+    - cron: '0 4 * * 0,6'      # 13:00 KST weekends — midday refresh
+    - cron: '0 11 * * *'       # 20:00 KST — evening refresh
   workflow_dispatch: {}
 
 permissions:
@@ -56,7 +62,9 @@ jobs:
       - name: Decide agent runtime
         run: |
           hour=$(date +%H)   # KST (TZ=Asia/Seoul)
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$hour" -lt 10 ]; then
+          # Full Claude analysis ONLY for the 07:20 slot (hour < 8) or manual runs —
+          # the 09:00+ market-hours refreshes must stay deterministic (no spend).
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$hour" -lt 8 ]; then
             echo "AGENT_RUNTIME=claude_cli" >> "$GITHUB_ENV"
             echo "Runtime: claude_cli (full daily analysis)"
           else
